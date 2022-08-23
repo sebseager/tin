@@ -1,3 +1,4 @@
+#include "abuf.h"
 #include <ctype.h>
 #include <errno.h>
 #include <signal.h>
@@ -40,32 +41,6 @@ void die(const char *s) {
 }
 
 /* append buffer */
-
-struct abuf {
-  char *buf;
-  size_t len;
-  size_t size;
-};
-
-void abuf_init(struct abuf *ab) {
-  ab->buf = NULL;
-  ab->len = 0;
-  ab->size = 0;
-}
-
-void abuf_append(struct abuf *ab, const char *s, size_t len) {
-  size_t new_len = ab->len + len;
-  if (new_len > ab->size) {
-    ab->size = !ab->size ? new_len : ab->size * 2;
-    ab->buf = realloc(ab->buf, ab->size);
-    if (!ab->buf)
-      die("realloc");
-  }
-  memcpy(&ab->buf[ab->len], s, len);
-  ab->len = new_len;
-}
-
-void abuf_free(struct abuf *ab) { free(ab->buf); }
 
 /* editor config */
 
@@ -166,7 +141,7 @@ void enable_raw_tty() {
 
 /* interface */
 
-void draw_welcome(struct abuf *ab, int line) {
+void draw_welcome(abuf *ab, int line) {
   char msg[80];
   int len;
   switch (line) {
@@ -183,38 +158,38 @@ void draw_welcome(struct abuf *ab, int line) {
   len = (len > cfg.ncols) ? cfg.ncols : len;
   int pad = (cfg.ncols - len) / 2 - 1;
   while (pad-- > 0)
-    abuf_append(ab, " ", 1);
-  abuf_append(ab, msg, len);
+    ab_append(ab, " ", 1);
+  ab_append(ab, msg, len);
 }
 
-void draw_rows(struct abuf *ab) {
+void draw_rows(abuf *ab) {
   for (int y = 0; y < cfg.nrows; y++) {
-    abuf_append(ab, "~", 1);
+    ab_append(ab, "~", 1);
     if (cfg.show_welcome && y >= cfg.nrows / 3) {
       draw_welcome(ab, y - cfg.nrows / 3);
     }
-    abuf_append(ab, ESC_SEQ "K", 3); // clear line being drawn
+    ab_append(ab, ESC_SEQ "K", 3); // clear line being drawn
     if (y < cfg.nrows - 1) {
-      abuf_append(ab, "\r\n", 2);
+      ab_append(ab, "\r\n", 2);
     }
   }
 }
 
 void refresh_screen() {
-  struct abuf ab;
-  abuf_init(&ab);
+  abuf ab;
+  ab_init(&ab);
 
-  abuf_append(&ab, ESC_SEQ "?25l", 6); // hide cursor
-  abuf_append(&ab, ESC_SEQ "H", 3);    // move cursor to top left
+  ab_append(&ab, ESC_SEQ "?25l", 6); // hide cursor
+  ab_append(&ab, ESC_SEQ "H", 3);    // move cursor to top left
 
   draw_rows(&ab);
   char buf[32] = "";
   snprintf(buf, sizeof(buf), ESC_SEQ "%d;%dH", cfg.cy + 1, cfg.cx + 1);
-  abuf_append(&ab, buf, strlen(buf));
+  ab_append(&ab, buf, strlen(buf));
 
-  abuf_append(&ab, ESC_SEQ "?25h", 6); // show cursor
+  ab_append(&ab, ESC_SEQ "?25h", 6); // show cursor
   write(STDOUT_FILENO, ab.buf, ab.len);
-  abuf_free(&ab);
+  ab_free(&ab);
 }
 
 /* navigation */
