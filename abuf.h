@@ -3,9 +3,9 @@
 /* append buffer */
 
 typedef struct abuf {
-  char *buf;
   size_t len;
   size_t size;
+  char *buf;
 } abuf;
 
 void ab_init(struct abuf *ab);
