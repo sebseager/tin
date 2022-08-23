@@ -1,5 +1,5 @@
 CC ?= gcc
-CFLAGS = -std=c99 -pedantic -Wall -Wextra -O3 -g3
+CFLAGS = -std=gnu99 -pedantic -Wall -Wextra -O3 -g3
 TARGET = tin
 SOURCES = $(wildcard *.c)
 HEADERS = $(wildcard *.h)
