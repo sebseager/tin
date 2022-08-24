@@ -19,7 +19,7 @@
 
 #define TIN_VERSION "0.1.0"
 #define TIN_TAB_STOP 8
-#define TIN_STATUS_MSG_SECS 3
+#define TIN_STATUS_MSG_SECS 4
 #define TAB_CHAR '\t'
 #define ESC_SEQ "\x1b["
 #define CTRL_KEY(key) ((key)&0x1f)
