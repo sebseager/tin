@@ -69,6 +69,7 @@ struct config {
   ssize_t rowoff, coloff;   // scroll offsets
   ssize_t nrows;            // number of text rows
   textrow *rows;            // text lines
+  char *filename;           // filename
   struct termios orig_tty;
 };
 
@@ -113,6 +114,7 @@ int measure_window(ssize_t *rows, ssize_t *cols) {
 void set_editor_size() {
   if (measure_window(&cfg.winrows, &cfg.wincols) == -1)
     die("measure_screen");
+  cfg.winrows -= 1; // for status bar
 }
 
 void init_config() {
@@ -120,6 +122,7 @@ void init_config() {
   cfg.rowoff = cfg.coloff = 0;
   cfg.nrows = 0;
   cfg.rows = NULL;
+  cfg.filename = NULL;
   set_editor_size();
 }
 
@@ -237,10 +240,35 @@ void draw_rows(abuf *ab) {
     }
 
     ab_append(ab, ESC_SEQ "K", 3); // clear line being drawn
-    if (y < cfg.winrows - 1) {
-      ab_append(ab, "\r\n", 2);
-    }
+    ab_append(ab, "\r\n", 2);      // keep last line empty for status
   }
+}
+
+void draw_status_bar(abuf *ab) {
+  ab_append(ab, ESC_SEQ "7m", 4); // reverse colors
+
+  // calculate components
+  char *fname = cfg.filename ? cfg.filename : "[Untitled]";
+  ssize_t row = cfg.rows ? cfg.cy + 1 : 0;
+  ssize_t col = cfg.rx + 1;
+  ssize_t nrows = cfg.nrows;
+  ssize_t ncols = (cfg.rows && cfg.cy < cfg.nrows ? cfg.rows[cfg.cy].rlen : 0);
+
+  // build status bar
+  char *lfmt = "%.20s";
+  char *rfmt = "%zd/%zd : %zd/%zd";
+  char lmsg[cfg.wincols + 1], rmsg[cfg.wincols + 1];
+  ssize_t rlen = snprintf(rmsg, cfg.wincols, rfmt, row, nrows, col, ncols);
+  ssize_t llen = snprintf(lmsg, cfg.wincols - sizeof(rlen), lfmt, fname);
+
+  //
+  ab_append(ab, lmsg, llen);
+  ssize_t nspaces = cfg.wincols - rlen - llen - 1;
+  while (nspaces-- > 0)
+    ab_append(ab, " ", 1);
+  ab_append(ab, rmsg, rlen);
+
+  ab_append(ab, ESC_SEQ "m", 3); // reset colors
 }
 
 void refresh_screen() {
@@ -252,14 +280,17 @@ void refresh_screen() {
   ab_append(&ab, ESC_SEQ "H", 3);    // move cursor to top left
 
   draw_rows(&ab);
+  draw_status_bar(&ab);
+
+  // position cursor
   char buf[64] = "";
   ssize_t crow = cfg.cy - cfg.rowoff + 1;
   ssize_t ccol = cfg.rx - cfg.coloff + 1;
   snprintf(buf, sizeof(buf), ESC_SEQ "%zd;%zdH", crow, ccol);
   ab_append(&ab, buf, strlen(buf));
 
-  ab_append(&ab, ESC_SEQ "?25h", 6); // show cursor
-  write(STDOUT_FILENO, ab.buf, ab.len);
+  ab_append(&ab, ESC_SEQ "?25h", 6);    // show cursor
+  write(STDOUT_FILENO, ab.buf, ab.len); // write buffer to stdout
   ab_free(&ab);
 }
 
@@ -314,6 +345,9 @@ void append_row(char *s, size_t len) {
 }
 
 void open_file(char *fname) {
+  free(cfg.filename);
+  cfg.filename = strdup(fname);
+
   FILE *fp = fopen(fname, "r");
   if (!fp)
     die("fopen");
