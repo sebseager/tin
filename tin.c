@@ -296,32 +296,6 @@ void set_status_msg(const char *fmt, ...) {
   cfg.statusmsg_time = time(NULL);
 }
 
-void refresh_screen() {
-  scroll();
-
-  abuf ab;
-  ab_init(&ab);
-  ab_append(&ab, ESC_SEQ "?25l", 6); // hide cursor
-  ab_append(&ab, ESC_SEQ "H", 3);    // move cursor to top left
-
-  draw_rows(&ab);
-  draw_status_bar(&ab);
-  draw_status_msg(&ab);
-
-  // position cursor
-  char buf[64] = "";
-  ssize_t crow = cfg.cy - cfg.rowoff + 1;
-  ssize_t ccol = cfg.rx - cfg.coloff + 1;
-  snprintf(buf, sizeof(buf), ESC_SEQ "%zd;%zdH", crow, ccol);
-  ab_append(&ab, buf, strlen(buf));
-
-  ab_append(&ab, ESC_SEQ "?25h", 6);    // show cursor
-  write(STDOUT_FILENO, ab.buf, ab.len); // write buffer to stdout
-  ab_free(&ab);
-}
-
-/* file i/o */
-
 void update_row(textrow *row) {
   // render tabs as spaces
   ssize_t tabs = 0;
@@ -369,6 +343,32 @@ void append_row(char *s, size_t len) {
 
   cfg.nrows++;
 }
+
+void refresh_screen() {
+  scroll();
+
+  abuf ab;
+  ab_init(&ab);
+  ab_append(&ab, ESC_SEQ "?25l", 6); // hide cursor
+  ab_append(&ab, ESC_SEQ "H", 3);    // move cursor to top left
+
+  draw_rows(&ab);
+  draw_status_bar(&ab);
+  draw_status_msg(&ab);
+
+  // position cursor
+  char buf[64] = "";
+  ssize_t crow = cfg.cy - cfg.rowoff + 1;
+  ssize_t ccol = cfg.rx - cfg.coloff + 1;
+  snprintf(buf, sizeof(buf), ESC_SEQ "%zd;%zdH", crow, ccol);
+  ab_append(&ab, buf, strlen(buf));
+
+  ab_append(&ab, ESC_SEQ "?25h", 6);    // show cursor
+  write(STDOUT_FILENO, ab.buf, ab.len); // write buffer to stdout
+  ab_free(&ab);
+}
+
+/* file i/o */
 
 void open_file(char *fname) {
   free(cfg.filename);
@@ -545,6 +545,8 @@ void handle_key() {
   }
   }
 }
+
+/* run loop */
 
 int main(int argc, char **argv) {
   enable_raw_tty();
