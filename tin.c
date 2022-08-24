@@ -322,7 +322,7 @@ void refresh_screen() {
   ab_free(&ab);
 }
 
-/* editor logic */
+/* row logic */
 
 void update_row(textrow *row) {
   // render tabs as spaces
@@ -375,39 +375,16 @@ void append_row(char *s, size_t len) {
 void insert_char(textrow *row, ssize_t at, int c) {
   if (at < 0 || at > row->len)
     at = row->len;
-  row->chars = realloc(row->chars, row->len + 2);
+  row->chars = realloc(row->chars, row->len + 2); // new char + null byte
   memmove(&row->chars[at + 1], &row->chars[at], row->len - at + 1);
   row->len++;
   row->chars[at] = c;
   update_row(row);
 }
 
-/* file i/o */
+/* editor logic */
 
-void open_file(char *fname) {
-  free(cfg.filename);
-  cfg.filename = strdup(fname);
 
-  FILE *fp = fopen(fname, "r");
-  if (!fp)
-    die("fopen");
-
-  char *line = NULL;
-  size_t size = 0;
-  ssize_t len = 0;
-
-  // read lines until EOF
-  while ((len = getline(&line, &size, fp)) != -1) {
-    while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
-      len--;
-    append_row(line, len);
-  }
-
-  free(line);
-  fclose(fp);
-}
-
-void write_file(char *fname) {}
 
 /* navigation */
 
@@ -454,7 +431,7 @@ void page_cursor(int key) {
   }
 }
 
-/* text processing */
+/* key processing */
 
 int read_key() {
   ssize_t nread;
@@ -561,6 +538,33 @@ void handle_key() {
   }
   }
 }
+
+/* file i/o */
+
+void open_file(char *fname) {
+  free(cfg.filename);
+  cfg.filename = strdup(fname);
+
+  FILE *fp = fopen(fname, "r");
+  if (!fp)
+    die("fopen");
+
+  char *line = NULL;
+  size_t size = 0;
+  ssize_t len = 0;
+
+  // read lines until EOF
+  while ((len = getline(&line, &size, fp)) != -1) {
+    while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
+      len--;
+    append_row(line, len);
+  }
+
+  free(line);
+  fclose(fp);
+}
+
+void write_file(char *fname) {}
 
 /* run loop */
 
