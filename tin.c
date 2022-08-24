@@ -16,8 +16,17 @@
 /* defines */
 
 #define TIN_VERSION "0.1.0"
+#define TIN_TAB_STOP 8
+#define TAB_CHAR '\t'
 #define ESC_SEQ "\x1b["
 #define CTRL_KEY(key) ((key)&0x1f)
+
+#define DEBUG_PRINT(fmt, ...)                                                  \
+  do {                                                                         \
+    FILE *fp = fopen("debug.tmp", "a");                                        \
+    fprintf(fp, fmt, ##__VA_ARGS__);                                           \
+    fclose(fp);                                                                \
+  } while (0);
 
 enum special_key {
   ARROW_UP = 1000,
@@ -55,6 +64,7 @@ void die(const char *s) {
 
 struct config {
   ssize_t cx, cy;           // cursor position
+  ssize_t rx;               // horizontal cursor render position
   ssize_t winrows, wincols; // window size
   ssize_t rowoff, coloff;   // scroll offsets
   ssize_t nrows;            // number of text rows
@@ -106,7 +116,7 @@ void set_editor_size() {
 }
 
 void init_config() {
-  cfg.cx = cfg.cy = 0;
+  cfg.cx = cfg.cy = cfg.rx = 0;
   cfg.rowoff = cfg.coloff = 0;
   cfg.nrows = 0;
   cfg.rows = NULL;
@@ -179,33 +189,51 @@ void draw_welcome(abuf *ab, int line) {
   ab_append(ab, msg, len);
 }
 
+ssize_t cx_to_rx(textrow *row, ssize_t cx) {
+  ssize_t rx = 0;
+  for (ssize_t j = 0; j < cx; j++) {
+    if (row->buf[j] == TAB_CHAR)
+      rx += (TIN_TAB_STOP - 1) - (rx % TIN_TAB_STOP);
+    rx++;
+  }
+  return rx;
+}
+
 void scroll() {
+  // calculate index into render buffer
+  // differs from cx if line contains tabs
+  cfg.rx = 0;
+  if (cfg.cy < cfg.nrows) {
+    cfg.rx = cx_to_rx(&cfg.rows[cfg.cy], cfg.cx);
+  }
+
+  // adjust offsets if cursor if off screen
   if (cfg.cy < cfg.rowoff)
     cfg.rowoff = cfg.cy;
   if (cfg.cy >= cfg.rowoff + cfg.winrows)
     cfg.rowoff = cfg.cy - cfg.winrows + 1;
-  if (cfg.cx < cfg.coloff)
-    cfg.coloff = cfg.cx;
-  if (cfg.cx >= cfg.coloff + cfg.wincols)
-    cfg.coloff = cfg.cx - cfg.wincols + 1;
+  if (cfg.rx < cfg.coloff)
+    cfg.coloff = cfg.rx;
+  if (cfg.rx >= cfg.coloff + cfg.wincols)
+    cfg.coloff = cfg.rx - cfg.wincols + 1;
 }
 
 void draw_rows(abuf *ab) {
   for (int y = 0; y < cfg.winrows; y++) {
     ssize_t filerow = y + cfg.rowoff;
-    if (y >= cfg.nrows) {
+    if (filerow >= cfg.nrows) {
       if (cfg.nrows == 0 && y >= cfg.winrows / 3) {
         draw_welcome(ab, y - cfg.winrows / 3);
       } else {
         ab_append(ab, "~", 1);
       }
     } else {
-      ssize_t len = cfg.rows[filerow].len - cfg.coloff;
+      ssize_t len = cfg.rows[filerow].rlen - cfg.coloff;
       if (len < 0)
         len = 0;
       else if (len > cfg.wincols)
         len = cfg.wincols;
-      ab_append(ab, cfg.rows[filerow].buf + cfg.coloff, len);
+      ab_append(ab, cfg.rows[filerow].render + cfg.coloff, len);
     }
 
     ab_append(ab, ESC_SEQ "K", 3); // clear line being drawn
@@ -226,7 +254,7 @@ void refresh_screen() {
   draw_rows(&ab);
   char buf[64] = "";
   ssize_t crow = cfg.cy - cfg.rowoff + 1;
-  ssize_t ccol = cfg.cx - cfg.coloff + 1;
+  ssize_t ccol = cfg.rx - cfg.coloff + 1;
   snprintf(buf, sizeof(buf), ESC_SEQ "%zd;%zdH", crow, ccol);
   ab_append(&ab, buf, strlen(buf));
 
@@ -238,12 +266,29 @@ void refresh_screen() {
 /* file i/o */
 
 void update_row(textrow *row) {
-  free(row->buf);
-  row->buf = malloc(row->len + 1);
-
-  ssize_t i;
+  // render tabs as spaces
+  ssize_t tabs = 0;
   for (ssize_t j = 0; j < row->len; j++) {
-    row->render[i++] = row->buf[j];
+    if (row->buf[j] == TAB_CHAR)
+      tabs++;
+  }
+
+  ssize_t rsize = row->len + tabs * (TIN_TAB_STOP - 1);
+  free(row->render);
+  row->render = malloc(rsize + 1);
+
+  ssize_t i = 0;
+  for (ssize_t j = 0; j < row->len; j++) {
+    switch (row->buf[j]) {
+    case TAB_CHAR:
+      row->render[i++] = ' ';
+      while (i % TIN_TAB_STOP != 0)
+        row->render[i++] = ' ';
+      break;
+    default:
+      row->render[i++] = row->buf[j];
+      break;
+    }
   }
 
   row->render[i] = '\0';
@@ -263,6 +308,7 @@ void append_row(char *s, size_t len) {
 
   cfg.rows[n].rlen = 0;
   cfg.rows[n].render = NULL;
+  update_row(&cfg.rows[n]);
 
   cfg.nrows++;
 }
@@ -303,7 +349,8 @@ void move_cursor(int key) {
   case ARROW_LEFT:
     if (cfg.cx)
       cfg.cx--;
-    else if (cfg.cy > 0) { // don't move up if at top
+    else if (cfg.cy > 0) {
+      // don't move up if at top
       cfg.cy--;
       cfg.cx = cfg.rows[cfg.cy].len;
     }
@@ -421,12 +468,21 @@ void handle_key() {
     cfg.cx = 0;
     break;
   case END_KEY:
-    cfg.cx = cfg.wincols - 1;
+    if (cfg.cy < cfg.nrows)
+      cfg.cx = cfg.rows[cfg.cy].len;
     break;
   case PAGE_UP:
-  case PAGE_DOWN:
+  case PAGE_DOWN: {
+    if (c == PAGE_UP) {
+      cfg.cy = cfg.rowoff;
+    } else if (c == PAGE_DOWN) {
+      cfg.cy = cfg.rowoff + cfg.winrows - 1;
+      if (cfg.cy > cfg.nrows)
+        cfg.cy = cfg.nrows;
+    }
     page_cursor(c);
     break;
+  }
   }
 }
 
