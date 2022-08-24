@@ -45,7 +45,7 @@ enum special_key {
 
 typedef struct textrow {
   ssize_t len;
-  char *buf;
+  char *chars;
   ssize_t rlen;
   char *render;
 } textrow;
@@ -224,7 +224,7 @@ void set_status_msg(const char *fmt, ...) {
 ssize_t cx_to_rx(textrow *row, ssize_t cx) {
   ssize_t rx = 0;
   for (ssize_t j = 0; j < cx; j++) {
-    if (row->buf[j] == TAB_CHAR)
+    if (row->chars[j] == TAB_CHAR)
       rx += (TIN_TAB_STOP - 1) - (rx % TIN_TAB_STOP);
     rx++;
   }
@@ -328,7 +328,7 @@ void update_row(textrow *row) {
   // render tabs as spaces
   ssize_t tabs = 0;
   for (ssize_t j = 0; j < row->len; j++) {
-    if (row->buf[j] == TAB_CHAR)
+    if (row->chars[j] == TAB_CHAR)
       tabs++;
   }
 
@@ -338,14 +338,14 @@ void update_row(textrow *row) {
 
   ssize_t i = 0;
   for (ssize_t j = 0; j < row->len; j++) {
-    switch (row->buf[j]) {
+    switch (row->chars[j]) {
     case TAB_CHAR:
       row->render[i++] = ' ';
       while (i % TIN_TAB_STOP != 0)
         row->render[i++] = ' ';
       break;
     default:
-      row->render[i++] = row->buf[j];
+      row->render[i++] = row->chars[j];
       break;
     }
   }
@@ -359,11 +359,11 @@ void append_row(char *s, size_t len) {
   size_t n = cfg.nrows;
 
   cfg.rows[n].len = len;
-  cfg.rows[n].buf = malloc(len + 1);
-  if (!cfg.rows[n].buf)
+  cfg.rows[n].chars = malloc(len + 1);
+  if (!cfg.rows[n].chars)
     die("malloc");
-  memcpy(cfg.rows[n].buf, s, len);
-  cfg.rows[n].buf[len] = '\0';
+  memcpy(cfg.rows[n].chars, s, len);
+  cfg.rows[n].chars[len] = '\0';
 
   cfg.rows[n].rlen = 0;
   cfg.rows[n].render = NULL;
@@ -373,7 +373,13 @@ void append_row(char *s, size_t len) {
 }
 
 void insert_char(textrow *row, ssize_t at, int c) {
-  
+  if (at < 0 || at > row->len)
+    at = row->len;
+  row->chars = realloc(row->chars, row->len + 2);
+  memmove(&row->chars[at + 1], &row->chars[at], row->len - at + 1);
+  row->len++;
+  row->chars[at] = c;
+  update_row(row);
 }
 
 /* file i/o */
