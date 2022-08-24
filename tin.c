@@ -6,17 +6,20 @@
 #include <ctype.h>
 #include <errno.h>
 #include <signal.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <termios.h>
+#include <time.h>
 #include <unistd.h>
 
 /* defines */
 
 #define TIN_VERSION "0.1.0"
 #define TIN_TAB_STOP 8
+#define TIN_STATUS_MSG_SECS 3
 #define TAB_CHAR '\t'
 #define ESC_SEQ "\x1b["
 #define CTRL_KEY(key) ((key)&0x1f)
@@ -70,6 +73,8 @@ struct config {
   ssize_t nrows;            // number of text rows
   textrow *rows;            // text lines
   char *filename;           // filename
+  char statusmsg[80];       // status message
+  time_t statusmsg_time;    // time status message was last updated
   struct termios orig_tty;
 };
 
@@ -114,7 +119,7 @@ int measure_window(ssize_t *rows, ssize_t *cols) {
 void set_editor_size() {
   if (measure_window(&cfg.winrows, &cfg.wincols) == -1)
     die("measure_screen");
-  cfg.winrows -= 1; // for status bar
+  cfg.winrows -= 2; // for status bar and status message
 }
 
 void init_config() {
@@ -123,6 +128,8 @@ void init_config() {
   cfg.nrows = 0;
   cfg.rows = NULL;
   cfg.filename = NULL;
+  cfg.statusmsg[0] = '\0';
+  cfg.statusmsg_time = 0;
   set_editor_size();
 }
 
@@ -269,6 +276,24 @@ void draw_status_bar(abuf *ab) {
   ab_append(ab, rmsg, rlen);
 
   ab_append(ab, ESC_SEQ "m", 3); // reset colors
+  ab_append(ab, "\r\n", 2);
+}
+
+void draw_status_msg(abuf *ab) {
+  ab_append(ab, ESC_SEQ "K", 3); // clear message bar
+  int msglen = strlen(cfg.statusmsg);
+  if (msglen > cfg.wincols)
+    msglen = cfg.wincols;
+  if (msglen && time(NULL) - cfg.statusmsg_time < TIN_STATUS_MSG_SECS)
+    ab_append(ab, cfg.statusmsg, msglen);
+}
+
+void set_status_msg(const char *fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  vsnprintf(cfg.statusmsg, sizeof(cfg.statusmsg), fmt, ap);
+  va_end(ap);
+  cfg.statusmsg_time = time(NULL);
 }
 
 void refresh_screen() {
@@ -281,6 +306,7 @@ void refresh_screen() {
 
   draw_rows(&ab);
   draw_status_bar(&ab);
+  draw_status_msg(&ab);
 
   // position cursor
   char buf[64] = "";
@@ -533,6 +559,8 @@ int main(int argc, char **argv) {
   sa.sa_handler = set_editor_size;
   sa.sa_flags = 0;
   sigaction(SIGWINCH, &sa, NULL);
+
+  set_status_msg("HELP: Ctrl-W to quit");
 
   while (1) {
     refresh_screen();
