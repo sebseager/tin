@@ -1,6 +1,6 @@
-# TIN - TIN Isn't Nano
+# tin - Tin Isn't Nano
 
-A text editor written in C and based on [antirez's kilo](https://github.com/antirez/kilo).
+Tin is a text editor written in C and based on [antirez's kilo](https://github.com/antirez/kilo).
 
 ## Development
 
