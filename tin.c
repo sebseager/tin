@@ -6,6 +6,7 @@
 #include "abuf.h"
 #include <ctype.h>
 #include <errno.h>
+#include <limits.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -213,7 +214,7 @@ void draw_status_bar(abuf *ab) {
   ab_strcat(ab, lmsg, llen);
   ssize_t nspaces = cfg.wincols - rlen - llen;
   while (nspaces-- > 0)
-    ab_strcat(ab, " ", 1);
+    ab_charcat(ab, ' ');
   ab_strcat(ab, rmsg, rlen);
   ab_strcat(ab, ESC_SEQ "m", 3); // reset colors
 }
@@ -597,6 +598,7 @@ void write_file() {
   mode_t fmode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH; // 0644
   uid_t uid = getuid();
   gid_t gid = getgid();
+  int islink = 0;
 
   if (cfg.filename == NULL) {
     cfg.filename = prompt("save as: %s");
@@ -605,12 +607,13 @@ void write_file() {
       return;
     }
   } else {
-    if (stat(cfg.filename, &st) == -1) {
+    if (lstat(cfg.filename, &st) == -1) {
       REPORT_ERR("stat error");
     } else {
       fmode = st.st_mode;
       uid = st.st_uid;
       gid = st.st_gid;
+      islink = S_ISLNK(st.st_mode);
     }
   }
 
@@ -638,9 +641,26 @@ void write_file() {
     }
   }
 
-  // rename tmp to original
-  if (rename(tmpname, cfg.filename) == -1)
+  // expand target path if symlink
+  char real[PATH_MAX + 1];
+  if (islink) {
+    ssize_t len = readlink(cfg.filename, real, PATH_MAX);
+    if (len == -1) {
+      REPORT_ERR("readlink error");
+      close(fd);
+      return;
+    }
+    real[len] = '\0';
+  } else {
+    strcpy(real, cfg.filename);
+  }
+
+  // rename tmp to target
+  if (rename(tmpname, real) == -1) {
     REPORT_ERR("save error");
+    close(fd);
+    return;
+  }
 
   // set file permissions
   if (fchmod(fd, fmode) == -1)
@@ -648,7 +668,7 @@ void write_file() {
   if (fchown(fd, uid, gid) == -1)
     REPORT_ERR("stat error");
 
-  // stat again to get filesize in case
+  // stat again to get final filesize
   if (stat(cfg.filename, &st) == -1)
     REPORT_ERR("stat error");
   set_status_msg("wrote %lld bytes", st.st_size);
@@ -659,7 +679,7 @@ void write_file() {
 
 void quit(int tries_left, int status) {
   if (cfg.dirty && tries_left) {
-    char *fmt = "Unsaved changes in buffer! (ctrl-w %d more %s to quit)";
+    char *fmt = "Unsaved changes in buffer! (ctrl-x %d more %s to quit)";
     char *noun = (tries_left == 1) ? "time" : "times";
     set_status_msg(fmt, tries_left, noun);
     return;
@@ -745,7 +765,7 @@ void handle_key() {
   int c = read_key();
 
   switch (c) {
-  case CTRL_KEY('w'): // quit editor
+  case CTRL_KEY('x'): // quit editor
     quit(quit_times--, 0);
     return;
 
@@ -809,7 +829,7 @@ void handle_key() {
 
 int main(int argc, char **argv) {
   // TODO go through all of TIN and get rid of as many "die"s as possible
-  // TODO opening a symlink crashes immediately
+  // TODO writing to symlink is weird
 
   enable_raw_tty();
   init_config();
