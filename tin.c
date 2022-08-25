@@ -22,6 +22,7 @@
 #define TIN_VERSION "0.1.0"
 #define TIN_TAB_STOP 8
 #define TIN_STATUS_MSG_SECS 2
+#define TIN_QUIT_TIMES 5
 #define TAB_CHAR '\t'
 #define ESC_SEQ "\x1b["
 #define CTRL_KEY(key) ((key)&0x1f)
@@ -528,7 +529,13 @@ void write_file() {
   cfg.dirty = 0;
 }
 
-void quit(int status) {
+void quit(int tries_left, int status) {
+  if (cfg.dirty && tries_left) {
+    char *fmt = "Unsaved changes in buffer! (ctrl-w %d more %s to quit)";
+    char *noun = (tries_left == 1) ? "time" : "times";
+    set_status_msg(fmt, tries_left, noun);
+    return;
+  }
   clear_tty();
   exit(status);
 }
@@ -606,11 +613,13 @@ int read_key() {
 }
 
 void handle_key() {
+  static int quit_times = TIN_QUIT_TIMES;
   int c = read_key();
+
   switch (c) {
   case CTRL_KEY('w'): // quit editor
-    quit(0);
-    break;
+    quit(quit_times--, 0);
+    return;
 
   case CTRL_KEY('s'):
     write_file();
@@ -662,6 +671,8 @@ void handle_key() {
     insert_at_cursor(c);
     break;
   }
+
+  quit_times = TIN_QUIT_TIMES;
 }
 
 /* run loop */
