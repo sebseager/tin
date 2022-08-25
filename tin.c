@@ -440,6 +440,8 @@ void update_row(textrow *row) {
   ssize_t rsize = row->len + tabs * (TIN_TAB_STOP - 1);
   free(row->render);
   row->render = malloc(rsize + 1);
+  if (!row->render)
+    die("malloc");
 
   ssize_t i = 0;
   for (ssize_t j = 0; j < row->len; j++) {
@@ -462,12 +464,12 @@ void update_row(textrow *row) {
 void insert_row(ssize_t at, char *s, size_t len) {
   if (at < 0 || at > cfg.nrows)
     return;
-  cfg.rows = realloc(cfg.rows, sizeof(textrow) * (cfg.nrows + 1));
+  if (!(cfg.rows = realloc(cfg.rows, sizeof(textrow) * (cfg.nrows + 1))))
+    die("realloc");
   memmove(&cfg.rows[at + 1], &cfg.rows[at], sizeof(textrow) * (cfg.nrows - at));
 
   cfg.rows[at].len = len;
-  cfg.rows[at].chars = malloc(len + 1);
-  if (!cfg.rows[at].chars)
+  if (!(cfg.rows[at].chars = malloc(len + 1)))
     die("malloc");
   memcpy(cfg.rows[at].chars, s, len);
   cfg.rows[at].chars[len] = '\0';
@@ -492,7 +494,8 @@ void del_row(ssize_t at) {
 }
 
 void row_strcat(textrow *row, char *s, size_t len) {
-  row->chars = realloc(row->chars, row->len + len + 1);
+  if (!(row->chars = realloc(row->chars, row->len + len + 1)))
+    die("realloc");
   memcpy(&row->chars[row->len], s, len);
   row->len += len;
   row->chars[row->len] = '\0';
@@ -505,7 +508,9 @@ void row_strcat(textrow *row, char *s, size_t len) {
 void insert_char(textrow *row, ssize_t at, int c) {
   if (at < 0 || at > row->len)
     at = row->len;
-  row->chars = realloc(row->chars, row->len + 2); // new char + null byte
+  // realloc for new char + nul byte
+  if (!(row->chars = realloc(row->chars, row->len + 2)))
+    die("realloc");
   memmove(&row->chars[at + 1], &row->chars[at], row->len - at + 1);
   row->len++;
   row->chars[at] = c;
@@ -978,8 +983,6 @@ void handle_key() {
 /* run loop */
 
 int main(int argc, char **argv) {
-  // TODO go through all of TIN and get rid of as many "die"s as possible
-
   enable_raw_tty();
   init_config();
 

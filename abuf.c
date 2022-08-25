@@ -23,7 +23,7 @@ int ab_charcat(struct abuf *ab, char c) {
   if (ab_realloc(ab, ab->len + 1) == -1)
     return -1;
   ab->buf[ab->len++] = c;
-  ab->buf[ab->len] = '\0'; // null terminate so can read as string
+  ab->buf[ab->len] = '\0'; // nul terminate so can read as string
   return 0;
 }
 
@@ -33,7 +33,7 @@ int ab_strcat(struct abuf *ab, const char *s, size_t len) {
     return -1;
   memcpy(&ab->buf[ab->len], s, len);
   ab->len = new_len;
-  ab->buf[ab->len] = '\0'; // null terminate so can read as string
+  ab->buf[ab->len] = '\0'; // nul terminate so can read as string
   return 0;
 }
 
