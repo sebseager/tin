@@ -27,13 +27,6 @@
 #define CTRL_KEY(key) (0x1f & (key))
 #define REPORT_ERR(msg) (set_status_msg(msg ": %s", strerror(errno)))
 
-#define DEBUG_PRINT(fmt, ...)                                                  \
-  do {                                                                         \
-    FILE *fp = fopen("debug.tmp", "a");                                        \
-    fprintf(fp, fmt, ##__VA_ARGS__);                                           \
-    fclose(fp);                                                                \
-  } while (0);
-
 enum named_key {
   TAB_KEY = '\t',
   RETURN = '\r',
