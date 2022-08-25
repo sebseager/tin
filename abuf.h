@@ -10,6 +10,10 @@ typedef struct abuf {
 
 void ab_init(struct abuf *ab);
 
-int ab_append(struct abuf *ab, const char *s, size_t len);
+int ab_charcat(struct abuf *ab, char c);
+
+int ab_strcat(struct abuf *ab, const char *s, size_t len);
+
+void ab_pop(struct abuf *ab, ssize_t times);
 
 void ab_free(struct abuf *ab);
