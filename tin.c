@@ -1,4 +1,3 @@
-#include <stddef.h>
 #define _DEFAULT_SOURCE
 #define _BSD_SOURCE
 #define _GNU_SOURCE
@@ -25,7 +24,7 @@
 #define TIN_STATUS_MSG_SECS 2
 #define TIN_QUIT_TIMES 3
 #define ESC_SEQ "\x1b["
-#define CTRL_KEY(key) ((key)&0x1f)
+#define CTRL_KEY(key) (0x1f & (key))
 #define REPORT_ERR(msg) (set_status_msg(msg ": %s", strerror(errno)))
 
 #define DEBUG_PRINT(fmt, ...)                                                  \
@@ -592,11 +591,11 @@ void find_callback(char *query, int key) {
   static int direction = 1;
 
   switch (key) {
-  case RETURN:
   case ESC:
     last_match = -1;
     direction = 1;
     break;
+  case RETURN:
   case ARROW_RIGHT:
     direction = 1;
     break;
