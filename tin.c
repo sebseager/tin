@@ -333,7 +333,7 @@ void draw_welcome(abuf *ab, int line) {
     len = snprintf(msg, sizeof(msg), "version %s", TIN_VERSION);
     break;
   case 2:
-    len = snprintf(msg, sizeof(msg), "ctrl-x exit   ctrl-s save   ctrl-f find");
+    len = snprintf(msg, sizeof(msg), "^X exit   ^S save   ^F find");
     break;
   default:
     len = 0;
@@ -837,7 +837,7 @@ void write_file() {
 
 void quit(int tries_left, int status) {
   if (cfg.dirty && tries_left) {
-    char *fmt = "Unsaved changes in buffer! (ctrl-x %d more %s to quit)";
+    char *fmt = "Unsaved changes in buffer! (press ^X %d more %s to quit)";
     char *noun = (tries_left == 1) ? "time" : "times";
     set_status_msg(fmt, tries_left, noun);
     return;
