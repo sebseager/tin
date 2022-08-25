@@ -1,4 +1,4 @@
-# TIM - TIM Isn't Nano
+# TIN - TIN Isn't Nano
 
 A text editor written in C and based on [antirez's kilo](https://github.com/antirez/kilo).
 
