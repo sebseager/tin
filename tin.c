@@ -1,3 +1,4 @@
+#include <stddef.h>
 #define _DEFAULT_SOURCE
 #define _BSD_SOURCE
 #define _GNU_SOURCE
@@ -20,7 +21,7 @@
 
 #define TIN_VERSION "0.1.0"
 #define TIN_TAB_STOP 8
-#define TIN_STATUS_MSG_SECS 3
+#define TIN_STATUS_MSG_SECS 2
 #define TAB_CHAR '\t'
 #define ESC_SEQ "\x1b["
 #define CTRL_KEY(key) ((key)&0x1f)
@@ -205,22 +206,31 @@ void draw_status_bar(abuf *ab) {
 
   // write status bar
   ab_append(ab, lmsg, llen);
-  ssize_t nspaces = cfg.wincols - rlen - llen - 1;
+  ssize_t nspaces = cfg.wincols - rlen - llen;
   while (nspaces-- > 0)
     ab_append(ab, " ", 1);
   ab_append(ab, rmsg, rlen);
-
   ab_append(ab, ESC_SEQ "m", 3); // reset colors
-  ab_append(ab, "\r\n", 2);
 }
 
 void draw_status_msg(abuf *ab) {
-  ab_append(ab, ESC_SEQ "K", 3); // clear message bar
-  int msglen = strlen(cfg.statusmsg);
+  ab_append(ab, ESC_SEQ "K", 3);  // clear message bar
+  ab_append(ab, ESC_SEQ "7m", 4); // reverse colors
+
+  // clear message after timeout
+  if (time(NULL) - cfg.statusmsg_time >= TIN_STATUS_MSG_SECS)
+    cfg.statusmsg[0] = '\0';
+
+  ssize_t msglen = strlen(cfg.statusmsg);
   if (msglen > cfg.wincols)
     msglen = cfg.wincols;
-  if (msglen && time(NULL) - cfg.statusmsg_time < TIN_STATUS_MSG_SECS)
+  if (msglen)
     ab_append(ab, cfg.statusmsg, msglen);
+  size_t nspaces = cfg.wincols - msglen;
+  while (nspaces-- > 0)
+    ab_append(ab, " ", 1);
+
+  ab_append(ab, ESC_SEQ "m", 3); // reset colors
 }
 
 void set_status_msg(const char *fmt, ...) {
@@ -288,6 +298,8 @@ void scroll() {
 }
 
 void draw_rows(abuf *ab) {
+  ab_append(ab, "\r\n", 2); // keep first line empty for status bar
+
   for (int y = 0; y < cfg.winrows; y++) {
     ssize_t filerow = y + cfg.rowoff;
     if (filerow >= cfg.nrows) {
@@ -306,7 +318,7 @@ void draw_rows(abuf *ab) {
     }
 
     ab_append(ab, ESC_SEQ "K", 3); // clear line being drawn
-    ab_append(ab, "\r\n", 2);      // keep last line empty for status
+    ab_append(ab, "\r\n", 2);      // keep last line empty for status msg
   }
 }
 
@@ -318,13 +330,13 @@ void refresh_screen() {
   ab_append(&ab, ESC_SEQ "?25l", 6); // hide cursor
   ab_append(&ab, ESC_SEQ "H", 3);    // move cursor to top left
 
-  draw_rows(&ab);
   draw_status_bar(&ab);
+  draw_rows(&ab);
   draw_status_msg(&ab);
 
   // position cursor
   char buf[64] = "";
-  ssize_t crow = cfg.cy - cfg.rowoff + 1;
+  ssize_t crow = cfg.cy - cfg.rowoff + 2; // extra 1 for top status bar
   ssize_t ccol = cfg.rx - cfg.coloff + 1;
   snprintf(buf, sizeof(buf), ESC_SEQ "%zd;%zdH", crow, ccol);
   ab_append(&ab, buf, strlen(buf));
