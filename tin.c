@@ -173,7 +173,7 @@ int measure_window(ssize_t *rows, ssize_t *cols) {
   return 0;
 }
 
-void set_linenumoff() {
+void set_numoff() {
   cfg.wincols += cfg.numoff;
   cfg.numoff = nplaces(cfg.nrows) + 1;
   cfg.wincols -= cfg.numoff;
@@ -183,7 +183,7 @@ void set_editor_size() {
   if (measure_window(&cfg.winrows, &cfg.wincols) == -1)
     die("measure_window");
   cfg.winrows -= 2; // for status bar and status message
-  set_linenumoff();
+  set_numoff();
 }
 
 void init_config() {
@@ -239,7 +239,7 @@ void enable_raw_tty() {
 
 /* status bar */
 
-void draw_status_bar(abuf *ab) {
+void draw_top_status(abuf *ab) {
   ab_strcat(ab, ESC_SEQ "7m", 4); // reverse colors
 
   // calculate components
@@ -251,24 +251,25 @@ void draw_status_bar(abuf *ab) {
   ssize_t ncols = (cfg.rows && cfg.cy < cfg.nrows ? cfg.rows[cfg.cy].rlen : 0);
 
   // build status bar
+  ssize_t barlen = cfg.wincols + cfg.numoff;
   char *lfmt = "[%s] %.20s";
   char *rfmt = "%zd/%zd : %zd/%zd";
-  char lmsg[cfg.wincols + 1], rmsg[cfg.wincols + 1];
-  ssize_t rlen = cfg.wincols;
+  char lmsg[barlen + 1], rmsg[barlen + 1];
+  ssize_t rlen = barlen;
   rlen = snprintf(rmsg, rlen, rfmt, row, nrows, col, ncols);
-  ssize_t llen = cfg.wincols - rlen;
+  ssize_t llen = barlen - rlen;
   llen = snprintf(lmsg, llen, lfmt, dirty, fname);
 
   // write status bar
   ab_strcat(ab, lmsg, llen);
-  ssize_t nspaces = cfg.wincols - rlen - llen;
+  ssize_t nspaces = barlen - rlen - llen;
   while (nspaces-- > 0)
     ab_charcat(ab, ' ');
   ab_strcat(ab, rmsg, rlen);
   ab_strcat(ab, ESC_SEQ "m", 3); // reset colors
 }
 
-void draw_status_msg(abuf *ab) {
+void draw_bot_status(abuf *ab) {
   ab_strcat(ab, ESC_SEQ "K", 3);  // clear message bar
   ab_strcat(ab, ESC_SEQ "7m", 4); // reverse colors
 
@@ -276,12 +277,13 @@ void draw_status_msg(abuf *ab) {
   if (time(NULL) - cfg.statusmsg_time >= TIN_STATUS_MSG_SECS)
     cfg.statusmsg[0] = '\0';
 
+  ssize_t barlen = cfg.wincols + cfg.numoff;
   ssize_t msglen = strlen(cfg.statusmsg);
-  if (msglen > cfg.wincols)
-    msglen = cfg.wincols;
+  if (msglen > barlen)
+    msglen = barlen;
   if (msglen)
     ab_strcat(ab, cfg.statusmsg, msglen);
-  size_t nspaces = cfg.wincols - msglen;
+  size_t nspaces = barlen - msglen;
   while (nspaces-- > 0)
     ab_strcat(ab, " ", 1);
 
@@ -325,10 +327,13 @@ void draw_welcome(abuf *ab, int line) {
   int len;
   switch (line) {
   case 0:
-    len = snprintf(msg, sizeof(msg), "TIN - TIN's Not Nano");
+    len = snprintf(msg, sizeof(msg), "TIN - TIN Isn't Nano");
     break;
   case 1:
     len = snprintf(msg, sizeof(msg), "version %s", TIN_VERSION);
+    break;
+  case 2:
+    len = snprintf(msg, sizeof(msg), "ctrl-x exit   ctrl-s save   ctrl-f find");
     break;
   default:
     len = 0;
@@ -410,10 +415,10 @@ void refresh_screen() {
   ab_strcat(&ab, ESC_SEQ "?25l", 6); // hide cursor
   ab_strcat(&ab, ESC_SEQ "H", 3);    // move cursor to top left
 
-  draw_status_bar(&ab);
-  set_linenumoff();
+  set_numoff();
+  draw_top_status(&ab);
   draw_rows(&ab);
-  draw_status_msg(&ab);
+  draw_bot_status(&ab);
 
   // position cursor
   char buf[64] = "";
@@ -708,7 +713,7 @@ void find() {
   int orig_coloff = cfg.coloff;
   int orig_rowoff = cfg.rowoff;
 
-  char *query = prompt("find: %s", find_callback);
+  char *query = prompt("find (next/prev with arrow keys): %s", find_callback);
 
   // jump to original cursor position
   if (!query || query[0] == '\0') {
