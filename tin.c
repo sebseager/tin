@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
@@ -32,6 +33,11 @@
   } while (0);
 
 enum special_key {
+  RETURN = '\r',
+  ESC = '\x1b',
+  BACKSPACE = 127,
+
+  // for non-printable/escaped keys use values bigger than char
   ARROW_UP = 1000,
   ARROW_DOWN,
   ARROW_RIGHT,
@@ -384,7 +390,12 @@ void insert_char(textrow *row, ssize_t at, int c) {
 
 /* editor logic */
 
-
+void insert_at_cursor(int c) {
+  // add new row if at end of last row
+  if (cfg.cy == cfg.nrows)
+    append_row("", 0);
+  insert_char(&cfg.rows[cfg.cy], cfg.cx++, c);
+}
 
 /* navigation */
 
@@ -431,6 +442,64 @@ void page_cursor(int key) {
   }
 }
 
+/* file i/o */
+
+void open_file(char *fname) {
+  free(cfg.filename);
+  cfg.filename = strdup(fname);
+
+  FILE *fp = fopen(fname, "r");
+  if (!fp)
+    die("fopen");
+
+  char *line = NULL;
+  size_t size = 0;
+  ssize_t len = 0;
+
+  // read lines until EOF
+  while ((len = getline(&line, &size, fp)) != -1) {
+    while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
+      len--;
+    append_row(line, len);
+  }
+
+  free(line);
+  fclose(fp);
+}
+
+// TODO go through everything and get rid of as many "die"s as possible
+// TODO assumes filename is set
+void write_file() {
+  // write to tmp file first
+  char *tmpname = strdup(cfg.filename);
+  tmpname = strcat(tmpname, ".XXXXXX");
+  int fd = mkstemp(tmpname);
+  if (fd < 1)
+    die("mkstemp");
+  for (ssize_t i = 0; i < cfg.nrows; i++) {
+    ssize_t len = cfg.rows[i].len;
+    if (write(fd, cfg.rows[i].chars, len) != len)
+      die("write");
+    if (write(fd, "\n", 1) != 1)
+      die("write");
+  }
+
+  // rename tmp to original and delete tmp
+  struct stat st;
+  if (fstat(fd, &st) == -1)
+    die("fstat");
+  if (rename(tmpname, cfg.filename) == -1)
+    die("rename");
+
+  // keep original file permissions
+  if (fchmod(fd, st.st_mode) == -1)
+    die("fchmod");
+  if (fchown(fd, st.st_uid, st.st_gid) == -1)
+    die("fchown");
+  if (unlink(tmpname) == -1)
+    die("unlink");
+}
+
 /* key processing */
 
 int read_key() {
@@ -442,19 +511,19 @@ int read_key() {
       die("read");
   }
 
-  if (c == ESC_SEQ[0]) {
+  if (c == ESC) {
     char seq[3] = "";
 
     // read up to 3 bytes: [<char1><char2>
     // return ESC key on failure
     if (read(STDIN_FILENO, &seq[0], 1) != 1)
-      return ESC_SEQ[0];
+      return ESC;
     if (read(STDIN_FILENO, &seq[1], 1) != 1)
-      return ESC_SEQ[0];
+      return ESC;
 
     if (seq[0] == '[') {
       if (seq[1] >= '0' && seq[1] <= '9' && read(STDIN_FILENO, &seq[2], 1) != 1)
-        return ESC_SEQ[0];
+        return ESC;
 
       if (seq[2] == '~') {
         switch (seq[1]) {
@@ -498,7 +567,7 @@ int read_key() {
       }
     }
 
-    return ESC_SEQ[0];
+    return ESC;
   }
 
   return c;
@@ -507,16 +576,26 @@ int read_key() {
 void handle_key() {
   int c = read_key();
   switch (c) {
-  case CTRL_KEY('w'):
+  case CTRL_KEY('w'): // quit editor
     clear_tty();
     exit(0);
     break;
+
+  case CTRL_KEY('s'):
+    write_file();
+    break;
+
+  case RETURN:
+    // TODO
+    break;
+
   case ARROW_UP:
   case ARROW_DOWN:
   case ARROW_LEFT:
   case ARROW_RIGHT:
     move_cursor(c);
     break;
+
   case HOME_KEY:
     cfg.cx = 0;
     break;
@@ -524,6 +603,13 @@ void handle_key() {
     if (cfg.cy < cfg.nrows)
       cfg.cx = cfg.rows[cfg.cy].len;
     break;
+
+  case BACKSPACE:
+  case CTRL_KEY('h'):
+  case DEL_KEY:
+    // TODO
+    break;
+
   case PAGE_UP:
   case PAGE_DOWN: {
     if (c == PAGE_UP) {
@@ -536,35 +622,16 @@ void handle_key() {
     page_cursor(c);
     break;
   }
+
+  case ESC:
+  case CTRL_KEY('l'):
+    break;
+
+  default:
+    insert_at_cursor(c);
+    break;
   }
 }
-
-/* file i/o */
-
-void open_file(char *fname) {
-  free(cfg.filename);
-  cfg.filename = strdup(fname);
-
-  FILE *fp = fopen(fname, "r");
-  if (!fp)
-    die("fopen");
-
-  char *line = NULL;
-  size_t size = 0;
-  ssize_t len = 0;
-
-  // read lines until EOF
-  while ((len = getline(&line, &size, fp)) != -1) {
-    while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
-      len--;
-    append_row(line, len);
-  }
-
-  free(line);
-  fclose(fp);
-}
-
-void write_file(char *fname) {}
 
 /* run loop */
 
