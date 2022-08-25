@@ -20,10 +20,11 @@
 
 #define TIN_VERSION "0.1.0"
 #define TIN_TAB_STOP 8
-#define TIN_STATUS_MSG_SECS 4
+#define TIN_STATUS_MSG_SECS 3
 #define TAB_CHAR '\t'
 #define ESC_SEQ "\x1b["
 #define CTRL_KEY(key) ((key)&0x1f)
+#define REPORT_ERR(msg) (set_status_msg(msg ": %s", strerror(errno)))
 
 #define DEBUG_PRINT(fmt, ...)                                                  \
   do {                                                                         \
@@ -81,6 +82,7 @@ struct config {
   char *filename;           // filename
   char statusmsg[80];       // status message
   time_t statusmsg_time;    // time status message was last updated
+  size_t dirty;             // number of changes since last save
   struct termios orig_tty;
 };
 
@@ -136,6 +138,7 @@ void init_config() {
   cfg.filename = NULL;
   cfg.statusmsg[0] = '\0';
   cfg.statusmsg_time = 0;
+  cfg.dirty = 0;
   set_editor_size();
 }
 
@@ -184,20 +187,23 @@ void draw_status_bar(abuf *ab) {
   ab_append(ab, ESC_SEQ "7m", 4); // reverse colors
 
   // calculate components
-  char *fname = cfg.filename ? cfg.filename : "[Untitled]";
+  char *fname = cfg.filename ? cfg.filename : "[New]";
+  char *dirty = cfg.dirty ? "*" : " ";
   ssize_t row = cfg.rows ? cfg.cy + 1 : 0;
   ssize_t col = cfg.rx + 1;
   ssize_t nrows = cfg.nrows;
   ssize_t ncols = (cfg.rows && cfg.cy < cfg.nrows ? cfg.rows[cfg.cy].rlen : 0);
 
   // build status bar
-  char *lfmt = "%.20s";
+  char *lfmt = "[%s] %.20s";
   char *rfmt = "%zd/%zd : %zd/%zd";
   char lmsg[cfg.wincols + 1], rmsg[cfg.wincols + 1];
-  ssize_t rlen = snprintf(rmsg, cfg.wincols, rfmt, row, nrows, col, ncols);
-  ssize_t llen = snprintf(lmsg, cfg.wincols - sizeof(rlen), lfmt, fname);
+  ssize_t rlen = cfg.wincols;
+  rlen = snprintf(rmsg, rlen, rfmt, row, nrows, col, ncols);
+  ssize_t llen = cfg.wincols - rlen;
+  llen = snprintf(lmsg, llen, lfmt, dirty, fname);
 
-  //
+  // write status bar
   ab_append(ab, lmsg, llen);
   ssize_t nspaces = cfg.wincols - rlen - llen - 1;
   while (nspaces-- > 0)
@@ -376,6 +382,7 @@ void append_row(char *s, size_t len) {
   update_row(&cfg.rows[n]);
 
   cfg.nrows++;
+  cfg.dirty++;
 }
 
 void insert_char(textrow *row, ssize_t at, int c) {
@@ -386,6 +393,7 @@ void insert_char(textrow *row, ssize_t at, int c) {
   row->len++;
   row->chars[at] = c;
   update_row(row);
+  cfg.dirty++;
 }
 
 /* editor logic */
@@ -465,39 +473,52 @@ void open_file(char *fname) {
 
   free(line);
   fclose(fp);
+  cfg.dirty = 0;
 }
 
-// TODO go through everything and get rid of as many "die"s as possible
 // TODO assumes filename is set
 void write_file() {
-  // write to tmp file first
+  // create tmp file to write everything to
   char *tmpname = strdup(cfg.filename);
   tmpname = strcat(tmpname, ".XXXXXX");
   int fd = mkstemp(tmpname);
-  if (fd < 1)
-    die("mkstemp");
-  for (ssize_t i = 0; i < cfg.nrows; i++) {
-    ssize_t len = cfg.rows[i].len;
-    if (write(fd, cfg.rows[i].chars, len) != len)
-      die("write");
-    if (write(fd, "\n", 1) != 1)
-      die("write");
+  if (fd == -1) {
+    REPORT_ERR("write error");
+    return;
   }
 
-  // rename tmp to original and delete tmp
+  // write lines to tmp file
+  for (ssize_t i = 0; i < cfg.nrows; i++) {
+    ssize_t len = cfg.rows[i].len;
+    if (write(fd, cfg.rows[i].chars, len) != len || write(fd, "\n", 1) != 1) {
+      REPORT_ERR("write error");
+      close(fd);
+      return;
+    }
+  }
+
+  // rename tmp to original
   struct stat st;
-  if (fstat(fd, &st) == -1)
-    die("fstat");
+  if (lstat(cfg.filename, &st) == -1)
+    REPORT_ERR("stat error");
   if (rename(tmpname, cfg.filename) == -1)
-    die("rename");
+    REPORT_ERR("save error");
 
   // keep original file permissions
   if (fchmod(fd, st.st_mode) == -1)
-    die("fchmod");
+    REPORT_ERR("stat error");
   if (fchown(fd, st.st_uid, st.st_gid) == -1)
-    die("fchown");
-  if (unlink(tmpname) == -1)
-    die("unlink");
+    REPORT_ERR("stat error");
+
+  set_status_msg("wrote %lld bytes", st.st_size);
+
+  close(fd);
+  cfg.dirty = 0;
+}
+
+void quit(int status) {
+  clear_tty();
+  exit(status);
 }
 
 /* key processing */
@@ -506,8 +527,7 @@ int read_key() {
   ssize_t nread;
   char c;
   while ((nread = read(STDIN_FILENO, &c, 1)) != 1) {
-    // ignore EINTR to retry after interrupt
-    if (nread == -1 && errno != EAGAIN && errno != EINTR)
+    if (nread == -1 && errno != EAGAIN)
       die("read");
   }
 
@@ -577,8 +597,7 @@ void handle_key() {
   int c = read_key();
   switch (c) {
   case CTRL_KEY('w'): // quit editor
-    clear_tty();
-    exit(0);
+    quit(0);
     break;
 
   case CTRL_KEY('s'):
@@ -636,6 +655,8 @@ void handle_key() {
 /* run loop */
 
 int main(int argc, char **argv) {
+  // TODO go through all of TIN and get rid of as many "die"s as possible
+
   enable_raw_tty();
   init_config();
 
@@ -646,7 +667,7 @@ int main(int argc, char **argv) {
   // handle terminal resize
   struct sigaction sa;
   sa.sa_handler = set_editor_size;
-  sa.sa_flags = 0;
+  sa.sa_flags = SA_RESTART; // restart interrupted syscalls
   sigaction(SIGWINCH, &sa, NULL);
 
   set_status_msg("HELP: Ctrl-W to quit");
