@@ -409,6 +409,15 @@ void del_row(int at) {
   cfg.dirty++;
 }
 
+void row_strcat(textrow *row, char *s, size_t len) {
+  row->chars = realloc(row->chars, row->len + len + 1);
+  memcpy(&row->chars[row->len], s, len);
+  row->len += len;
+  row->chars[row->len] = '\0';
+  update_row(row);
+  cfg.dirty++;
+}
+
 /* char logic */
 
 void insert_char(textrow *row, ssize_t at, int c) {
@@ -440,13 +449,21 @@ void insert_at_cursor(int c) {
   insert_char(&cfg.rows[cfg.cy], cfg.cx++, c);
 }
 
-void delete_at_cursor() {
+void backspace_at_cursor() {
+  if (cfg.cx == 0 && cfg.cy == 0)
+    return;
   if (cfg.cy == cfg.nrows)
     return;
+
   textrow *row = &cfg.rows[cfg.cy];
   if (cfg.cx > 0) {
     delete_char(row, cfg.cx - 1);
     cfg.cx--;
+  } else {
+    cfg.cx = cfg.rows[cfg.cy - 1].len;
+    row_strcat(&cfg.rows[cfg.cy - 1], row->chars, row->len);
+    del_row(cfg.cy);
+    cfg.cy--;
   }
 }
 
@@ -681,7 +698,7 @@ void handle_key() {
     // fallthrough
   case BACKSPACE:
   case CTRL_KEY('h'):
-    delete_at_cursor();
+    backspace_at_cursor();
     break;
 
   case PAGE_UP:
