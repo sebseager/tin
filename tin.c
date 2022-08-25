@@ -22,7 +22,7 @@
 #define TIN_VERSION "0.1.0"
 #define TIN_TAB_STOP 8
 #define TIN_STATUS_MSG_SECS 2
-#define TIN_QUIT_TIMES 5
+#define TIN_QUIT_TIMES 3
 #define TAB_CHAR '\t'
 #define ESC_SEQ "\x1b["
 #define CTRL_KEY(key) ((key)&0x1f)
@@ -35,12 +35,12 @@
     fclose(fp);                                                                \
   } while (0);
 
-enum special_key {
+enum named_key {
   RETURN = '\r',
   ESC = '\x1b',
   BACKSPACE = 127,
 
-  // for non-printable/escaped keys use values bigger than char
+  // for non-printable/escaped keys use values that can't fit in char
   ARROW_UP = 1000,
   ARROW_DOWN,
   ARROW_RIGHT,
@@ -58,6 +58,10 @@ typedef struct textrow {
   ssize_t rlen;
   char *render;
 } textrow;
+
+/* prototypes */
+
+int read_key();
 
 /* helpers */
 
@@ -186,7 +190,7 @@ void enable_raw_tty() {
 /* status bar */
 
 void draw_status_bar(abuf *ab) {
-  ab_append(ab, ESC_SEQ "7m", 4); // reverse colors
+  ab_strcat(ab, ESC_SEQ "7m", 4); // reverse colors
 
   // calculate components
   char *fname = cfg.filename ? cfg.filename : "[New]";
@@ -206,17 +210,17 @@ void draw_status_bar(abuf *ab) {
   llen = snprintf(lmsg, llen, lfmt, dirty, fname);
 
   // write status bar
-  ab_append(ab, lmsg, llen);
+  ab_strcat(ab, lmsg, llen);
   ssize_t nspaces = cfg.wincols - rlen - llen;
   while (nspaces-- > 0)
-    ab_append(ab, " ", 1);
-  ab_append(ab, rmsg, rlen);
-  ab_append(ab, ESC_SEQ "m", 3); // reset colors
+    ab_strcat(ab, " ", 1);
+  ab_strcat(ab, rmsg, rlen);
+  ab_strcat(ab, ESC_SEQ "m", 3); // reset colors
 }
 
 void draw_status_msg(abuf *ab) {
-  ab_append(ab, ESC_SEQ "K", 3);  // clear message bar
-  ab_append(ab, ESC_SEQ "7m", 4); // reverse colors
+  ab_strcat(ab, ESC_SEQ "K", 3);  // clear message bar
+  ab_strcat(ab, ESC_SEQ "7m", 4); // reverse colors
 
   // clear message after timeout
   if (time(NULL) - cfg.statusmsg_time >= TIN_STATUS_MSG_SECS)
@@ -226,12 +230,12 @@ void draw_status_msg(abuf *ab) {
   if (msglen > cfg.wincols)
     msglen = cfg.wincols;
   if (msglen)
-    ab_append(ab, cfg.statusmsg, msglen);
+    ab_strcat(ab, cfg.statusmsg, msglen);
   size_t nspaces = cfg.wincols - msglen;
   while (nspaces-- > 0)
-    ab_append(ab, " ", 1);
+    ab_strcat(ab, " ", 1);
 
-  ab_append(ab, ESC_SEQ "m", 3); // reset colors
+  ab_strcat(ab, ESC_SEQ "m", 3); // reset colors
 }
 
 void set_status_msg(const char *fmt, ...) {
@@ -271,12 +275,12 @@ void draw_welcome(abuf *ab, int line) {
   len = (len > cfg.wincols) ? cfg.wincols : len;
   int pad = (cfg.wincols - len) / 2;
   if (pad) {
-    ab_append(ab, "~", 1);
+    ab_strcat(ab, "~", 1);
     pad--;
   }
   while (pad-- > 0)
-    ab_append(ab, " ", 1);
-  ab_append(ab, msg, len);
+    ab_strcat(ab, " ", 1);
+  ab_strcat(ab, msg, len);
 }
 
 void scroll() {
@@ -299,7 +303,7 @@ void scroll() {
 }
 
 void draw_rows(abuf *ab) {
-  ab_append(ab, "\r\n", 2); // keep first line empty for status bar
+  ab_strcat(ab, "\r\n", 2); // keep first line empty for status bar
 
   for (int y = 0; y < cfg.winrows; y++) {
     ssize_t filerow = y + cfg.rowoff;
@@ -307,7 +311,7 @@ void draw_rows(abuf *ab) {
       if (cfg.nrows == 0 && y >= cfg.winrows / 3) {
         draw_welcome(ab, y - cfg.winrows / 3);
       } else {
-        ab_append(ab, "~", 1);
+        ab_strcat(ab, "~", 1);
       }
     } else {
       ssize_t len = cfg.rows[filerow].rlen - cfg.coloff;
@@ -315,11 +319,11 @@ void draw_rows(abuf *ab) {
         len = 0;
       else if (len > cfg.wincols)
         len = cfg.wincols;
-      ab_append(ab, cfg.rows[filerow].render + cfg.coloff, len);
+      ab_strcat(ab, cfg.rows[filerow].render + cfg.coloff, len);
     }
 
-    ab_append(ab, ESC_SEQ "K", 3); // clear line being drawn
-    ab_append(ab, "\r\n", 2);      // keep last line empty for status msg
+    ab_strcat(ab, ESC_SEQ "K", 3); // clear line being drawn
+    ab_strcat(ab, "\r\n", 2);      // keep last line empty for status msg
   }
 }
 
@@ -328,8 +332,8 @@ void refresh_screen() {
 
   abuf ab;
   ab_init(&ab);
-  ab_append(&ab, ESC_SEQ "?25l", 6); // hide cursor
-  ab_append(&ab, ESC_SEQ "H", 3);    // move cursor to top left
+  ab_strcat(&ab, ESC_SEQ "?25l", 6); // hide cursor
+  ab_strcat(&ab, ESC_SEQ "H", 3);    // move cursor to top left
 
   draw_status_bar(&ab);
   draw_rows(&ab);
@@ -340,9 +344,9 @@ void refresh_screen() {
   ssize_t crow = cfg.cy - cfg.rowoff + 2; // extra 1 for top status bar
   ssize_t ccol = cfg.rx - cfg.coloff + 1;
   snprintf(buf, sizeof(buf), ESC_SEQ "%zd;%zdH", crow, ccol);
-  ab_append(&ab, buf, strlen(buf));
+  ab_strcat(&ab, buf, strlen(buf));
 
-  ab_append(&ab, ESC_SEQ "?25h", 6);    // show cursor
+  ab_strcat(&ab, ESC_SEQ "?25h", 6);    // show cursor
   write(STDOUT_FILENO, ab.buf, ab.len); // write buffer to stdout
   ab_free(&ab);
 }
@@ -379,26 +383,28 @@ void update_row(textrow *row) {
   row->rlen = i;
 }
 
-void append_row(char *s, size_t len) {
+void insert_row(ssize_t at, char *s, size_t len) {
+  if (at < 0 || at > cfg.nrows)
+    return;
   cfg.rows = realloc(cfg.rows, sizeof(textrow) * (cfg.nrows + 1));
-  size_t n = cfg.nrows;
+  memmove(&cfg.rows[at + 1], &cfg.rows[at], sizeof(textrow) * (cfg.nrows - at));
 
-  cfg.rows[n].len = len;
-  cfg.rows[n].chars = malloc(len + 1);
-  if (!cfg.rows[n].chars)
+  cfg.rows[at].len = len;
+  cfg.rows[at].chars = malloc(len + 1);
+  if (!cfg.rows[at].chars)
     die("malloc");
-  memcpy(cfg.rows[n].chars, s, len);
-  cfg.rows[n].chars[len] = '\0';
+  memcpy(cfg.rows[at].chars, s, len);
+  cfg.rows[at].chars[len] = '\0';
 
-  cfg.rows[n].rlen = 0;
-  cfg.rows[n].render = NULL;
-  update_row(&cfg.rows[n]);
+  cfg.rows[at].rlen = 0;
+  cfg.rows[at].render = NULL;
+  update_row(&cfg.rows[at]);
 
   cfg.nrows++;
   cfg.dirty++;
 }
 
-void del_row(int at) {
+void del_row(ssize_t at) {
   if (at < 0 || at >= cfg.nrows)
     return;
   free(cfg.rows[at].chars);
@@ -445,7 +451,7 @@ void delete_char(textrow *row, ssize_t at) {
 void insert_at_cursor(int c) {
   // add new row if at end of last row
   if (cfg.cy == cfg.nrows)
-    append_row("", 0);
+    insert_row(cfg.nrows, "", 0);
   insert_char(&cfg.rows[cfg.cy], cfg.cx++, c);
 }
 
@@ -464,6 +470,53 @@ void backspace_at_cursor() {
     row_strcat(&cfg.rows[cfg.cy - 1], row->chars, row->len);
     del_row(cfg.cy);
     cfg.cy--;
+  }
+}
+
+void newline_at_cursor() {
+  if (cfg.cx == 0) {
+    insert_row(cfg.cy, "", 0);
+  } else {
+    textrow *row = &cfg.rows[cfg.cy];
+    insert_row(cfg.cy + 1, &row->chars[cfg.cx], row->len - cfg.cx);
+    row = &cfg.rows[cfg.cy];
+    row->len = cfg.cx;
+    row->chars[row->len] = '\0';
+    update_row(row);
+  }
+  cfg.cy++;
+  cfg.cx = 0;
+}
+
+char *prompt(char *prompt) {
+  abuf ab;
+  ab_init(&ab);
+
+  while (1) {
+    set_status_msg(prompt, ab.buf);
+    refresh_screen();
+    int c = read_key();
+    switch (c) {
+    case DEL_KEY:
+    case BACKSPACE:
+    case CTRL_KEY('h'):
+      ab_pop(&ab, 1);
+      break;
+    case ESC:
+      set_status_msg("");
+      ab_free(&ab);
+      return NULL;
+    case RETURN:
+      set_status_msg("");
+      char *buf = strdup(ab.buf);
+      ab_free(&ab);
+      return buf;
+    default:
+      if (!iscntrl(c) && c < 128) {
+        ab_charcat(&ab, c);
+      }
+      break;
+    }
   }
 }
 
@@ -530,7 +583,7 @@ void open_file(char *fname) {
   while ((len = getline(&line, &size, fp)) != -1) {
     while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
       len--;
-    append_row(line, len);
+    insert_row(cfg.nrows, line, len);
   }
 
   free(line);
@@ -540,6 +593,14 @@ void open_file(char *fname) {
 
 // TODO assumes filename is set
 void write_file() {
+  if (cfg.filename == NULL) {
+    cfg.filename = prompt("write to: %s");
+    if (cfg.filename == NULL) {
+      set_status_msg("write aborted");
+      return;
+    }
+  }
+
   // create tmp file to write everything to
   char *tmpname = strdup(cfg.filename);
   tmpname = strcat(tmpname, ".XXXXXX");
@@ -675,7 +736,7 @@ void handle_key() {
     break;
 
   case RETURN:
-    // TODO
+    newline_at_cursor();
     break;
 
   case ARROW_UP:
