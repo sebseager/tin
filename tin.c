@@ -129,7 +129,7 @@ struct config {
   ssize_t nrows;            // number of text rows
   textrow *rows;            // text lines
   char *filename;           // filename
-  char statusmsg[80];       // status message
+  char statusmsg[128];      // status message
   time_t statusmsg_time;    // time status message was last updated
   size_t dirty;             // number of changes since last save
   struct termios orig_tty;
@@ -253,7 +253,7 @@ void draw_top_status(abuf *ab) {
   // build status bar
   ssize_t barlen = cfg.wincols + cfg.numoff;
   char *lfmt = "[%s] %.20s";
-  char *rfmt = "%zd/%zd : %zd/%zd";
+  char *rfmt = "line %zd/%zd, col %zd/%zd";
   char lmsg[barlen + 1], rmsg[barlen + 1];
   ssize_t rlen = barlen;
   rlen = snprintf(rmsg, rlen, rfmt, row, nrows, col, ncols);

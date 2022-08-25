@@ -9,6 +9,7 @@ In no particular order:
 - [x] Read/create files, make changes, and write to disk
 - [x] Store file contents in memory using rows containing appendable string buffers
 - [x] Write to temporary file first before overwriting target file
+- [x] Mash exit command several times to throw out unsaved buffer
 - [x] Line numbers
 - [x] Find
 - [x] Adjust editor size when window is resized
