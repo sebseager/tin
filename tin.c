@@ -398,6 +398,19 @@ void append_row(char *s, size_t len) {
   cfg.dirty++;
 }
 
+void del_row(int at) {
+  if (at < 0 || at >= cfg.nrows)
+    return;
+  free(cfg.rows[at].chars);
+  free(cfg.rows[at].render);
+  size_t rowsize = sizeof(textrow) * (cfg.nrows - at - 1);
+  memmove(&cfg.rows[at], &cfg.rows[at + 1], rowsize);
+  cfg.nrows--;
+  cfg.dirty++;
+}
+
+/* char logic */
+
 void insert_char(textrow *row, ssize_t at, int c) {
   if (at < 0 || at > row->len)
     at = row->len;
@@ -409,6 +422,15 @@ void insert_char(textrow *row, ssize_t at, int c) {
   cfg.dirty++;
 }
 
+void delete_char(textrow *row, ssize_t at) {
+  if (at < 0 || at >= row->len)
+    return;
+  memmove(&row->chars[at], &row->chars[at + 1], row->len - at);
+  row->len--;
+  update_row(row);
+  cfg.dirty++;
+}
+
 /* editor logic */
 
 void insert_at_cursor(int c) {
@@ -416,6 +438,16 @@ void insert_at_cursor(int c) {
   if (cfg.cy == cfg.nrows)
     append_row("", 0);
   insert_char(&cfg.rows[cfg.cy], cfg.cx++, c);
+}
+
+void delete_at_cursor() {
+  if (cfg.cy == cfg.nrows)
+    return;
+  textrow *row = &cfg.rows[cfg.cy];
+  if (cfg.cx > 0) {
+    delete_char(row, cfg.cx - 1);
+    cfg.cx--;
+  }
 }
 
 /* navigation */
@@ -644,10 +676,12 @@ void handle_key() {
       cfg.cx = cfg.rows[cfg.cy].len;
     break;
 
+  case DEL_KEY:
+    move_cursor(ARROW_RIGHT);
+    // fallthrough
   case BACKSPACE:
   case CTRL_KEY('h'):
-  case DEL_KEY:
-    // TODO
+    delete_at_cursor();
     break;
 
   case PAGE_UP:
