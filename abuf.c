@@ -3,7 +3,7 @@
 #include <unistd.h>
 
 int ab_realloc(struct abuf *ab, size_t new_len) {
-  if (new_len > ab->size) {
+  if (new_len >= ab->size) {
     ab->size = (ab->size + new_len + 1) * 2;
     char *tmp = realloc(ab->buf, ab->size);
     if (!tmp)
@@ -29,7 +29,7 @@ int ab_charcat(struct abuf *ab, char c) {
 
 int ab_strcat(struct abuf *ab, const char *s, size_t len) {
   size_t new_len = ab->len + len;
-  if (ab_realloc(ab, new_len) == -1)
+  if (ab_realloc(ab, new_len + 1) == -1)
     return -1;
   memcpy(&ab->buf[ab->len], s, len);
   ab->len = new_len;
