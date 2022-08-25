@@ -493,7 +493,7 @@ char *prompt(char *prompt) {
   ab_init(&ab);
 
   while (1) {
-    set_status_msg(prompt, ab.buf);
+    set_status_msg(prompt, ab.buf ? ab.buf : "");
     refresh_screen();
     int c = read_key();
     switch (c) {
@@ -571,7 +571,7 @@ void open_file(char *fname) {
   free(cfg.filename);
   cfg.filename = strdup(fname);
 
-  FILE *fp = fopen(fname, "r");
+  FILE *fp = fopen(cfg.filename, "r");
   if (!fp)
     die("fopen");
 
@@ -593,11 +593,24 @@ void open_file(char *fname) {
 
 // TODO assumes filename is set
 void write_file() {
+  struct stat st;
+  mode_t fmode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH; // 0644
+  uid_t uid = getuid();
+  gid_t gid = getgid();
+
   if (cfg.filename == NULL) {
-    cfg.filename = prompt("write to: %s");
+    cfg.filename = prompt("save as: %s");
     if (cfg.filename == NULL) {
       set_status_msg("write aborted");
       return;
+    }
+  } else {
+    if (stat(cfg.filename, &st) == -1) {
+      REPORT_ERR("stat error");
+    } else {
+      fmode = st.st_mode;
+      uid = st.st_uid;
+      gid = st.st_gid;
     }
   }
 
@@ -613,7 +626,12 @@ void write_file() {
   // write lines to tmp file
   for (ssize_t i = 0; i < cfg.nrows; i++) {
     ssize_t len = cfg.rows[i].len;
-    if (write(fd, cfg.rows[i].chars, len) != len || write(fd, "\n", 1) != 1) {
+    if (write(fd, cfg.rows[i].chars, len) != len) {
+      REPORT_ERR("write error");
+      close(fd);
+      return;
+    }
+    if (i < cfg.nrows - 1 && write(fd, "\n", 1) != 1) {
       REPORT_ERR("write error");
       close(fd);
       return;
@@ -621,18 +639,18 @@ void write_file() {
   }
 
   // rename tmp to original
-  struct stat st;
-  if (lstat(cfg.filename, &st) == -1)
-    REPORT_ERR("stat error");
   if (rename(tmpname, cfg.filename) == -1)
     REPORT_ERR("save error");
 
-  // keep original file permissions
-  if (fchmod(fd, st.st_mode) == -1)
+  // set file permissions
+  if (fchmod(fd, fmode) == -1)
     REPORT_ERR("stat error");
-  if (fchown(fd, st.st_uid, st.st_gid) == -1)
+  if (fchown(fd, uid, gid) == -1)
     REPORT_ERR("stat error");
 
+  // stat again to get filesize in case
+  if (stat(cfg.filename, &st) == -1)
+    REPORT_ERR("stat error");
   set_status_msg("wrote %lld bytes", st.st_size);
 
   close(fd);
@@ -791,6 +809,7 @@ void handle_key() {
 
 int main(int argc, char **argv) {
   // TODO go through all of TIN and get rid of as many "die"s as possible
+  // TODO opening a symlink crashes immediately
 
   enable_raw_tty();
   init_config();
@@ -804,8 +823,6 @@ int main(int argc, char **argv) {
   sa.sa_handler = set_editor_size;
   sa.sa_flags = SA_RESTART; // restart interrupted syscalls
   sigaction(SIGWINCH, &sa, NULL);
-
-  set_status_msg("HELP: Ctrl-W to quit");
 
   while (1) {
     refresh_screen();
