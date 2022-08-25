@@ -598,7 +598,7 @@ char *prompt(char *prompt, void (*callback)(char *, int)) {
       set_status_msg("");
       if (callback)
         callback(ab.buf, c);
-      char *buf = strdup(ab.buf);
+      char *buf = ab.buf ? strdup(ab.buf) : NULL;
       ab_free(&ab);
       return buf;
     default:
@@ -661,6 +661,9 @@ void page_cursor(int key) {
 /* search */
 
 void find_callback(char *query, int key) {
+  if (!query)
+    return;
+
   static int last_match = -1;
   static int direction = 1;
 
