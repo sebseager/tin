@@ -76,6 +76,48 @@ void die(const char *s) {
   exit(1);
 }
 
+int nplaces(ssize_t n) {
+  if (n < 0)
+    n = (n == INT_MIN) ? INT_MAX : -n;
+  if (n < 10)
+    return 1;
+  if (n < 100)
+    return 2;
+  if (n < 1000)
+    return 3;
+  if (n < 10000)
+    return 4;
+  if (n < 100000)
+    return 5;
+  if (n < 1000000)
+    return 6;
+  if (n < 10000000)
+    return 7;
+  if (n < 100000000)
+    return 8;
+  if (n < 1000000000)
+    return 9;
+  if (n < 10000000000)
+    return 10;
+  if (n < 100000000000)
+    return 11;
+  if (n < 1000000000000)
+    return 12;
+  if (n < 10000000000000)
+    return 13;
+  if (n < 100000000000000)
+    return 14;
+  if (n < 1000000000000000)
+    return 15;
+  if (n < 10000000000000000)
+    return 16;
+  if (n < 100000000000000000)
+    return 17;
+  if (n < 1000000000000000000)
+    return 18;
+  return 19;
+}
+
 /* config */
 
 struct config {
@@ -83,6 +125,7 @@ struct config {
   ssize_t rx;               // horizontal cursor render position
   ssize_t winrows, wincols; // window size
   ssize_t rowoff, coloff;   // scroll offsets
+  ssize_t numoff;           // line number offset
   ssize_t nrows;            // number of text rows
   textrow *rows;            // text lines
   char *filename;           // filename
@@ -130,10 +173,17 @@ int measure_window(ssize_t *rows, ssize_t *cols) {
   return 0;
 }
 
+void set_linenumoff() {
+  cfg.wincols += cfg.numoff;
+  cfg.numoff = nplaces(cfg.nrows) + 1;
+  cfg.wincols -= cfg.numoff;
+}
+
 void set_editor_size() {
   if (measure_window(&cfg.winrows, &cfg.wincols) == -1)
-    die("measure_screen");
+    die("measure_window");
   cfg.winrows -= 2; // for status bar and status message
+  set_linenumoff();
 }
 
 void init_config() {
@@ -331,6 +381,19 @@ void draw_rows(abuf *ab) {
         len = 0;
       else if (len > cfg.wincols)
         len = cfg.wincols;
+
+      // draw line number
+      char numstr[cfg.numoff];
+      int numlen = snprintf(numstr, cfg.numoff, "%zd", filerow);
+      ab_strcat(ab, ESC_SEQ "31m", 5); // color line numbers
+      while (numlen++ < cfg.numoff - 1) {
+        ab_charcat(ab, ' ');
+      }
+      ab_strcat(ab, numstr, cfg.numoff - 1);
+      ab_strcat(ab, ESC_SEQ "m", 3); // reset colors
+      ab_charcat(ab, ' ');
+
+      // draw row
       ab_strcat(ab, cfg.rows[filerow].render + cfg.coloff, len);
     }
 
@@ -348,13 +411,14 @@ void refresh_screen() {
   ab_strcat(&ab, ESC_SEQ "H", 3);    // move cursor to top left
 
   draw_status_bar(&ab);
+  set_linenumoff();
   draw_rows(&ab);
   draw_status_msg(&ab);
 
   // position cursor
   char buf[64] = "";
   ssize_t crow = cfg.cy - cfg.rowoff + 2; // extra 1 for top status bar
-  ssize_t ccol = cfg.rx - cfg.coloff + 1;
+  ssize_t ccol = cfg.rx - cfg.coloff + cfg.numoff + 1;
   snprintf(buf, sizeof(buf), ESC_SEQ "%zd;%zdH", crow, ccol);
   ab_strcat(&ab, buf, strlen(buf));
 
@@ -591,15 +655,17 @@ void find_callback(char *query, int key) {
   static int direction = 1;
 
   switch (key) {
+  case RETURN:
   case ESC:
     last_match = -1;
     direction = 1;
     break;
-  case RETURN:
   case ARROW_RIGHT:
+  case ARROW_DOWN:
     direction = 1;
     break;
   case ARROW_LEFT:
+  case ARROW_UP:
     direction = -1;
     break;
   default:
