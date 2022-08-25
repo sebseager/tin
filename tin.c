@@ -24,7 +24,6 @@
 #define TIN_TAB_STOP 8
 #define TIN_STATUS_MSG_SECS 2
 #define TIN_QUIT_TIMES 3
-#define TAB_CHAR '\t'
 #define ESC_SEQ "\x1b["
 #define CTRL_KEY(key) ((key)&0x1f)
 #define REPORT_ERR(msg) (set_status_msg(msg ": %s", strerror(errno)))
@@ -37,6 +36,7 @@
   } while (0);
 
 enum named_key {
+  TAB_KEY = '\t',
   RETURN = '\r',
   ESC = '\x1b',
   BACKSPACE = 127,
@@ -252,11 +252,23 @@ void set_status_msg(const char *fmt, ...) {
 ssize_t cx_to_rx(textrow *row, ssize_t cx) {
   ssize_t rx = 0;
   for (ssize_t j = 0; j < cx; j++) {
-    if (row->chars[j] == TAB_CHAR)
+    if (row->chars[j] == TAB_KEY)
       rx += (TIN_TAB_STOP - 1) - (rx % TIN_TAB_STOP);
     rx++;
   }
   return rx;
+}
+
+ssize_t rx_to_cx(textrow *row, int rx) {
+  ssize_t cx, cur_rx = 0;
+  for (cx = 0; cx < row->len; cx++) {
+    if (row->chars[cx] == TAB_KEY)
+      cur_rx += (TIN_TAB_STOP - 1) - (cur_rx % TIN_TAB_STOP);
+    cur_rx++;
+    if (cur_rx > rx)
+      return cx;
+  }
+  return cx;
 }
 
 void draw_welcome(abuf *ab, int line) {
@@ -358,7 +370,7 @@ void update_row(textrow *row) {
   // render tabs as spaces
   ssize_t tabs = 0;
   for (ssize_t j = 0; j < row->len; j++) {
-    if (row->chars[j] == TAB_CHAR)
+    if (row->chars[j] == TAB_KEY)
       tabs++;
   }
 
@@ -369,7 +381,7 @@ void update_row(textrow *row) {
   ssize_t i = 0;
   for (ssize_t j = 0; j < row->len; j++) {
     switch (row->chars[j]) {
-    case TAB_CHAR:
+    case TAB_KEY:
       row->render[i++] = ' ';
       while (i % TIN_TAB_STOP != 0)
         row->render[i++] = ' ';
@@ -489,7 +501,7 @@ void newline_at_cursor() {
   cfg.cx = 0;
 }
 
-char *prompt(char *prompt) {
+char *prompt(char *prompt, void (*callback)(char *, int)) {
   abuf ab;
   ab_init(&ab);
 
@@ -505,10 +517,14 @@ char *prompt(char *prompt) {
       break;
     case ESC:
       set_status_msg("");
+      if (callback)
+        callback(ab.buf, c);
       ab_free(&ab);
       return NULL;
     case RETURN:
       set_status_msg("");
+      if (callback)
+        callback(ab.buf, c);
       char *buf = strdup(ab.buf);
       ab_free(&ab);
       return buf;
@@ -518,6 +534,9 @@ char *prompt(char *prompt) {
       }
       break;
     }
+
+    if (callback)
+      callback(ab.buf, c);
   }
 }
 
@@ -566,6 +585,72 @@ void page_cursor(int key) {
   }
 }
 
+/* search */
+
+void find_callback(char *query, int key) {
+  static int last_match = -1;
+  static int direction = 1;
+
+  switch (key) {
+  case RETURN:
+  case ESC:
+    last_match = -1;
+    direction = 1;
+    break;
+  case ARROW_RIGHT:
+    direction = 1;
+    break;
+  case ARROW_LEFT:
+    direction = -1;
+    break;
+  default:
+    last_match = -1;
+    direction = 1;
+    break;
+  }
+
+  ssize_t current = last_match;
+  if (last_match == -1)
+    direction = 1;
+
+  for (ssize_t i = 0; i < cfg.nrows; i++) {
+    current += direction;
+    if (current == -1)
+      current = cfg.nrows - 1;
+    else if (current == cfg.nrows)
+      current = 0;
+
+    textrow *row = &cfg.rows[current];
+    char *match = strstr(row->render, query);
+    if (match) {
+      last_match = current;
+      cfg.cy = current;
+      cfg.cx = rx_to_cx(row, match - row->render);
+      cfg.rowoff = cfg.nrows;
+      break;
+    }
+  }
+}
+
+void find() {
+  int orig_cx = cfg.cx;
+  int orig_cy = cfg.cy;
+  int orig_coloff = cfg.coloff;
+  int orig_rowoff = cfg.rowoff;
+
+  char *query = prompt("find: %s", find_callback);
+
+  // jump to original cursor position
+  if (!query || query[0] == '\0') {
+    cfg.cx = orig_cx;
+    cfg.cy = orig_cy;
+    cfg.coloff = orig_coloff;
+    cfg.rowoff = orig_rowoff;
+  }
+
+  free(query);
+}
+
 /* file i/o */
 
 void open_file(char *fname) {
@@ -592,7 +677,6 @@ void open_file(char *fname) {
   cfg.dirty = 0;
 }
 
-// TODO assumes filename is set
 void write_file() {
   struct stat st;
   mode_t fmode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH; // 0644
@@ -601,7 +685,7 @@ void write_file() {
   int islink = 0;
 
   if (cfg.filename == NULL) {
-    cfg.filename = prompt("save as: %s");
+    cfg.filename = prompt("save as: %s", NULL);
     if (cfg.filename == NULL) {
       set_status_msg("write aborted");
       return;
@@ -672,7 +756,6 @@ void write_file() {
   if (stat(cfg.filename, &st) == -1)
     REPORT_ERR("stat error");
   set_status_msg("wrote %lld bytes", st.st_size);
-
   close(fd);
   cfg.dirty = 0;
 }
@@ -768,9 +851,11 @@ void handle_key() {
   case CTRL_KEY('x'): // quit editor
     quit(quit_times--, 0);
     return;
-
   case CTRL_KEY('s'):
     write_file();
+    break;
+  case CTRL_KEY('f'):
+    find();
     break;
 
   case RETURN:
@@ -829,7 +914,6 @@ void handle_key() {
 
 int main(int argc, char **argv) {
   // TODO go through all of TIN and get rid of as many "die"s as possible
-  // TODO writing to symlink is weird
 
   enable_raw_tty();
   init_config();
