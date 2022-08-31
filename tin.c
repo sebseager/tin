@@ -20,12 +20,23 @@
 /* defines */
 
 #define TIN_VERSION "0.1.0"
-#define TIN_TAB_STOP 8
+#define TIN_TAB_STOP 4
 #define TIN_STATUS_MSG_SECS 2
 #define TIN_QUIT_TIMES 3
 #define ESC_SEQ "\x1b["
 #define CTRL_KEY(key) (0x1f & (key))
 #define REPORT_ERR(msg) (set_status_msg(msg ": %s", strerror(errno)))
+
+// UTF encoding format
+// 0xxxxxxx   ASCII (normal char range)
+// 1xxxxxxx   UTF (i.e. (unsigned) c > 127)
+// 10xxxxxx   internal byte in a multi-byte sequence
+// 11xxxxxx   head of multi-byte sequence, indicates sequence length
+// 110xxxxx   head of two-byte sequence
+// 1110xxxx   head of three-byte sequence
+// 11110xxx   head of four-byte sequence
+#define UTF_HEAD_BYTE(c) (!((c & 0xC0) ^ 0xC0))
+#define UTF_BODY_BYTE(c) (!((c & 0xC0) ^ 0x80))
 
 enum named_key {
   TAB_KEY = '\t',
@@ -33,7 +44,7 @@ enum named_key {
   ESC = '\x1b',
   BACKSPACE = 127,
 
-  // for non-printable/escaped keys use values that can't fit in char
+  // for non-printable/escaped keys use values that can't fit in 8 bits
   ARROW_UP = 1000,
   ARROW_DOWN,
   ARROW_RIGHT,
@@ -46,10 +57,11 @@ enum named_key {
 };
 
 typedef struct textrow {
-  ssize_t len;
-  char *chars;
-  ssize_t rlen;
-  char *render;
+  ssize_t len;  // number of raw chars
+  ssize_t ilen; // number of invisible raw chars (e.g. UTF extra bytes)
+  char *chars;  // raw chars
+  ssize_t rlen; // number of rendered chars (e.g. tabs show as spaces)
+  char *render; // rendered chars
 } textrow;
 
 /* prototypes */
@@ -296,9 +308,15 @@ void set_status_msg(const char *fmt, ...) {
 ssize_t cx_to_rx(textrow *row, ssize_t cx) {
   ssize_t rx = 0;
   for (ssize_t j = 0; j < cx; j++) {
-    if (row->chars[j] == TAB_KEY)
-      rx += (TIN_TAB_STOP - 1) - (rx % TIN_TAB_STOP);
-    rx++;
+    char c = row->chars[j];
+    if (c == TAB_KEY)
+      rx += TIN_TAB_STOP - (rx % TIN_TAB_STOP);
+    else if (UTF_HEAD_BYTE(c))
+      rx += 1;
+    else if (UTF_BODY_BYTE(c))
+      continue;
+    else
+      rx++;
   }
   return rx;
 }
@@ -306,9 +324,15 @@ ssize_t cx_to_rx(textrow *row, ssize_t cx) {
 ssize_t rx_to_cx(textrow *row, int rx) {
   ssize_t cx, cur_rx = 0;
   for (cx = 0; cx < row->len; cx++) {
-    if (row->chars[cx] == TAB_KEY)
-      cur_rx += (TIN_TAB_STOP - 1) - (cur_rx % TIN_TAB_STOP);
-    cur_rx++;
+    char c = row->chars[cx];
+    if (c == TAB_KEY)
+      cur_rx += TIN_TAB_STOP - (cur_rx % TIN_TAB_STOP);
+    else if (UTF_HEAD_BYTE(c))
+      cur_rx += 1;
+    else if (UTF_BODY_BYTE(c))
+      continue;
+    else
+      cur_rx++;
     if (cur_rx > rx)
       return cx;
   }
@@ -344,6 +368,9 @@ void draw_welcome(abuf *ab, int line) {
 }
 
 void scroll() {
+  // TODO: FIX SCROLLING BEHAVIOR SO YOU ONLY EVER MOVE WHOLE UNICODE CHARS AT A
+  // TIME
+
   // calculate index into render buffer
   // differs from cx if line contains tabs
   cfg.rx = 0;
@@ -374,11 +401,12 @@ void draw_rows(abuf *ab) {
         ab_strcat(ab, "~", 1);
       }
     } else {
-      ssize_t len = cfg.rows[filerow].rlen - cfg.coloff;
-      if (len < 0)
-        len = 0;
-      else if (len > cfg.wincols)
-        len = cfg.wincols;
+      textrow *row = &cfg.rows[filerow];
+      ssize_t printlen = row->rlen - cfg.coloff;
+      if (printlen < 0)
+        printlen = 0;
+      else if (printlen > cfg.wincols + row->ilen)
+        printlen = cfg.wincols;
 
       // draw line number
       char numstr[cfg.numoff];
@@ -392,7 +420,7 @@ void draw_rows(abuf *ab) {
       ab_charcat(ab, ' ');
 
       // draw row
-      ab_strcat(ab, cfg.rows[filerow].render + cfg.coloff, len);
+      ab_strcat(ab, row->render + cfg.coloff, printlen);
     }
 
     ab_strcat(ab, ESC_SEQ "K", 3); // clear line being drawn
@@ -428,19 +456,22 @@ void refresh_screen() {
 /* row logic */
 
 void update_row(textrow *row) {
-  // render tabs as spaces
-  ssize_t tabs = 0;
+  ssize_t rsize = row->len;
+  row->ilen = 0;
   for (ssize_t j = 0; j < row->len; j++) {
-    if (row->chars[j] == TAB_KEY)
-      tabs++;
+    char c = row->chars[j];
+    if (c == TAB_KEY)
+      rsize += TIN_TAB_STOP - 1;
+    if (UTF_BODY_BYTE(c))
+      row->ilen++;
   }
 
-  ssize_t rsize = row->len + tabs * (TIN_TAB_STOP - 1);
   free(row->render);
   row->render = malloc(rsize + 1);
   if (!row->render)
     die("malloc");
 
+  // render tabs as spaces
   ssize_t i = 0;
   for (ssize_t j = 0; j < row->len; j++) {
     switch (row->chars[j]) {
@@ -542,6 +573,11 @@ void backspace_at_cursor() {
 
   textrow *row = &cfg.rows[cfg.cy];
   if (cfg.cx > 0) {
+    // backspace multiple times to get rid of full unicode chars
+    while (UTF_BODY_BYTE(row->chars[cfg.cx - 1])) {
+      delete_char(row, cfg.cx - 1);
+      cfg.cx--;
+    }
     delete_char(row, cfg.cx - 1);
     cfg.cx--;
   } else {
@@ -620,18 +656,25 @@ void move_cursor(int key) {
       cfg.cy++;
     break;
   case ARROW_LEFT:
-    if (cfg.cx)
+    if (cfg.cx) {
       cfg.cx--;
-    else if (cfg.cy > 0) {
+      // always move cursor to head of full unicode char
+      while (cfg.cx > 1 && UTF_BODY_BYTE(row->chars[cfg.cx]))
+        cfg.cx--;
+    } else if (cfg.cy > 0) {
       // don't move up if at top
       cfg.cy--;
       cfg.cx = cfg.rows[cfg.cy].len;
     }
     break;
   case ARROW_RIGHT:
-    if (row && cfg.cx < row->len)
+    if (row && cfg.cx < row->len) {
       cfg.cx++;
-    else if (row && cfg.cx == row->len) {
+      // always move cursor past full unicode char
+      while (cfg.cx < row->len && UTF_BODY_BYTE(row->chars[cfg.cx]))
+        cfg.cx++;
+    } else if (row && cfg.cx == row->len) {
+      // don't move down if at bottom
       cfg.cy++;
       cfg.cx = 0;
     }

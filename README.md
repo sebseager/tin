@@ -16,7 +16,7 @@ In no particular order:
 - [x] Status bar with filename, cursor information, and status messages
 - [x] Take nonexistent filename argument as new file
 - [ ] Copy/cut/paste
-- [ ] Unicode support
+- [ ] Unicode (UTF8) support
 - [ ] Auto-indent if previous line began with tabs
 - [ ] Search highlighting
 - [ ] Replace
