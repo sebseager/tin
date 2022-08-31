@@ -382,7 +382,7 @@ void draw_rows(abuf *ab) {
 
       // draw line number
       char numstr[cfg.numoff];
-      int numlen = snprintf(numstr, cfg.numoff, "%zd", filerow);
+      int numlen = snprintf(numstr, cfg.numoff, "%zd", filerow + 1);
       ab_strcat(ab, ESC_SEQ "31m", 5); // color line numbers
       while (numlen++ < cfg.numoff - 1) {
         ab_charcat(ab, ' ');
