@@ -14,6 +14,7 @@ In no particular order:
 - [x] Find
 - [x] Adjust editor size when window is resized
 - [x] Status bar with filename, cursor information, and status messages
+- [x] Take nonexistent filename argument as new file
 - [ ] Copy/cut/paste
 - [ ] Unicode support
 - [ ] Auto-indent if previous line began with tabs

@@ -724,13 +724,13 @@ void find() {
 
 /* file i/o */
 
-void open_file(char *fname) {
+int open_file(char *fname) {
   free(cfg.filename);
   cfg.filename = strdup(fname);
 
   FILE *fp = fopen(cfg.filename, "r");
   if (!fp)
-    die("fopen");
+    return -1;
 
   char *line = NULL;
   size_t size = 0;
@@ -746,6 +746,7 @@ void open_file(char *fname) {
   free(line);
   fclose(fp);
   cfg.dirty = 0;
+  return 0;
 }
 
 void write_file() {
