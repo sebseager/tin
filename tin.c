@@ -58,7 +58,7 @@ enum named_key {
 
 typedef struct textrow {
   ssize_t len;  // number of raw chars
-  ssize_t ilen; // number of invisible raw chars (e.g. UTF extra bytes)
+  ssize_t ilen; // number of invisible raw chars (e.g. utf extra bytes)
   char *chars;  // raw chars
   ssize_t rlen; // number of rendered chars (e.g. tabs show as spaces)
   char *render; // rendered chars
@@ -140,7 +140,7 @@ struct config {
   struct termios orig_tty;
 };
 
-struct config cfg;
+struct config E;
 
 int cursor_pos(ssize_t *rows, ssize_t *cols) {
   if (write(STDOUT_FILENO, ESC_SEQ "6n", 4) != 4)
@@ -179,43 +179,43 @@ int measure_window(ssize_t *rows, ssize_t *cols) {
 }
 
 void set_numoff() {
-  cfg.wincols += cfg.numoff;
-  cfg.numoff = nplaces(cfg.nrows) + 1;
-  cfg.wincols -= cfg.numoff;
+  E.wincols += E.numoff;
+  E.numoff = nplaces(E.nrows) + 1;
+  E.wincols -= E.numoff;
 }
 
 void set_editor_size() {
-  if (measure_window(&cfg.winrows, &cfg.wincols) == -1)
+  if (measure_window(&E.winrows, &E.wincols) == -1)
     die("measure_window");
-  cfg.winrows -= 2; // for status bar and status message
+  E.winrows -= 2; // for status bar and status message
   set_numoff();
 }
 
 void init_config() {
-  cfg.cx = cfg.cy = cfg.rx = 0;
-  cfg.rowoff = cfg.coloff = 0;
-  cfg.nrows = 0;
-  cfg.rows = NULL;
-  cfg.filename = NULL;
-  cfg.statusmsg[0] = '\0';
-  cfg.statusmsg_time = 0;
-  cfg.dirty = 0;
+  E.cx = E.cy = E.rx = 0;
+  E.rowoff = E.coloff = 0;
+  E.nrows = 0;
+  E.rows = NULL;
+  E.filename = NULL;
+  E.statusmsg[0] = '\0';
+  E.statusmsg_time = 0;
+  E.dirty = 0;
   set_editor_size();
 }
 
 /* terminal control */
 
 void disable_raw_tty() {
-  if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &cfg.orig_tty) == -1)
+  if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &E.orig_tty) == -1)
     die("tcsetattr");
 }
 
 void enable_raw_tty() {
-  if (tcgetattr(STDIN_FILENO, &cfg.orig_tty) == -1)
+  if (tcgetattr(STDIN_FILENO, &E.orig_tty) == -1)
     die("tcgetattr");
 
   atexit(disable_raw_tty);
-  struct termios tty = cfg.orig_tty;
+  struct termios tty = E.orig_tty;
 
   // input flags
   tty.c_iflag &= ~IXON;   // fix ^S, ^Q
@@ -244,19 +244,20 @@ void enable_raw_tty() {
 
 /* status bar */
 
-void draw_top_status(abuf *ab) {
+void draw_upper_status(abuf *ab) {
   ab_strcat(ab, ESC_SEQ "7m", 4); // reverse colors
 
   // calculate components
-  char *fname = cfg.filename ? cfg.filename : "[New]";
-  char *dirty = cfg.dirty ? "*" : " ";
-  ssize_t row = cfg.rows ? cfg.cy + 1 : 0;
-  ssize_t col = cfg.rx + 1;
-  ssize_t nrows = cfg.nrows;
-  ssize_t ncols = (cfg.rows && cfg.cy < cfg.nrows ? cfg.rows[cfg.cy].rlen : 0);
+  char *fname = E.filename ? E.filename : "[New]";
+  char *dirty = E.dirty ? "*" : " ";
+  ssize_t row = E.rows ? E.cy + 1 : 0;
+  ssize_t col = E.rx + 1;
+  ssize_t nrows = E.nrows;
+  ssize_t ncols =
+      (E.rows && E.cy < E.nrows ? E.rows[E.cy].rlen - E.rows[E.cy].ilen : 0);
 
   // build status bar
-  ssize_t barlen = cfg.wincols + cfg.numoff;
+  ssize_t barlen = E.wincols + E.numoff;
   char *lfmt = "[%s] %.20s";
   char *rfmt = "line %zd/%zd, col %zd/%zd";
   char lmsg[barlen + 1], rmsg[barlen + 1];
@@ -274,20 +275,20 @@ void draw_top_status(abuf *ab) {
   ab_strcat(ab, ESC_SEQ "m", 3); // reset colors
 }
 
-void draw_bot_status(abuf *ab) {
+void draw_lower_status(abuf *ab) {
   ab_strcat(ab, ESC_SEQ "K", 3);  // clear message bar
   ab_strcat(ab, ESC_SEQ "7m", 4); // reverse colors
 
   // clear message after timeout
-  if (time(NULL) - cfg.statusmsg_time >= TIN_STATUS_MSG_SECS)
-    cfg.statusmsg[0] = '\0';
+  if (time(NULL) - E.statusmsg_time >= TIN_STATUS_MSG_SECS)
+    E.statusmsg[0] = '\0';
 
-  ssize_t barlen = cfg.wincols + cfg.numoff;
-  ssize_t msglen = strlen(cfg.statusmsg);
+  ssize_t barlen = E.wincols + E.numoff;
+  ssize_t msglen = strlen(E.statusmsg);
   if (msglen > barlen)
     msglen = barlen;
   if (msglen)
-    ab_strcat(ab, cfg.statusmsg, msglen);
+    ab_strcat(ab, E.statusmsg, msglen);
   size_t nspaces = barlen - msglen;
   while (nspaces-- > 0)
     ab_strcat(ab, " ", 1);
@@ -298,9 +299,9 @@ void draw_bot_status(abuf *ab) {
 void set_status_msg(const char *fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
-  vsnprintf(cfg.statusmsg, sizeof(cfg.statusmsg), fmt, ap);
+  vsnprintf(E.statusmsg, sizeof(E.statusmsg), fmt, ap);
   va_end(ap);
-  cfg.statusmsg_time = time(NULL);
+  E.statusmsg_time = time(NULL);
 }
 
 /* main interface */
@@ -333,6 +334,7 @@ ssize_t rx_to_cx(textrow *row, int rx) {
       continue;
     else
       cur_rx++;
+
     if (cur_rx > rx)
       return cx;
   }
@@ -356,8 +358,8 @@ void draw_welcome(abuf *ab, int line) {
     len = 0;
   }
 
-  len = (len > cfg.wincols) ? cfg.wincols : len;
-  int pad = (cfg.wincols - len) / 2;
+  len = (len > E.wincols) ? E.wincols : len;
+  int pad = (E.wincols - len) / 2;
   if (pad) {
     ab_strcat(ab, "~", 1);
     pad--;
@@ -368,59 +370,69 @@ void draw_welcome(abuf *ab, int line) {
 }
 
 void scroll() {
-  // TODO: FIX SCROLLING BEHAVIOR SO YOU ONLY EVER MOVE WHOLE UNICODE CHARS AT A
-  // TIME
-
   // calculate index into render buffer
   // differs from cx if line contains tabs
-  cfg.rx = 0;
-  if (cfg.cy < cfg.nrows) {
-    cfg.rx = cx_to_rx(&cfg.rows[cfg.cy], cfg.cx);
-  }
+  E.rx = 0;
+  if (E.cy < E.nrows)
+    E.rx = cx_to_rx(&E.rows[E.cy], E.cx);
 
   // adjust offsets if cursor if off screen
-  if (cfg.cy < cfg.rowoff)
-    cfg.rowoff = cfg.cy;
-  if (cfg.cy >= cfg.rowoff + cfg.winrows)
-    cfg.rowoff = cfg.cy - cfg.winrows + 1;
-  if (cfg.rx < cfg.coloff)
-    cfg.coloff = cfg.rx;
-  if (cfg.rx >= cfg.coloff + cfg.wincols)
-    cfg.coloff = cfg.rx - cfg.wincols + 1;
+  if (E.cy < E.rowoff) {
+    E.rowoff = E.cy;
+  }
+  if (E.cy >= E.rowoff + E.winrows) {
+    E.rowoff = E.cy - E.winrows + 1;
+  }
+  if (E.rx < E.coloff) {
+    E.coloff = E.rx;
+  }
+  if (E.rx >= E.coloff + E.wincols) {
+    E.coloff = E.rx - E.wincols + 1;
+  }
 }
 
 void draw_rows(abuf *ab) {
   ab_strcat(ab, "\r\n", 2); // keep first line empty for status bar
 
-  for (int y = 0; y < cfg.winrows; y++) {
-    ssize_t filerow = y + cfg.rowoff;
-    if (filerow >= cfg.nrows) {
-      if (cfg.nrows == 0 && y >= cfg.winrows / 3) {
-        draw_welcome(ab, y - cfg.winrows / 3);
+  for (int y = 0; y < E.winrows; y++) {
+    ssize_t filerow = y + E.rowoff;
+    if (filerow >= E.nrows) {
+      if (E.nrows == 0 && y >= E.winrows / 3) {
+        draw_welcome(ab, y - E.winrows / 3);
       } else {
         ab_strcat(ab, "~", 1);
       }
     } else {
-      textrow *row = &cfg.rows[filerow];
-      ssize_t printlen = row->rlen - cfg.coloff;
+      textrow *row = &E.rows[filerow];
+      ssize_t start = E.coloff;
+      ssize_t printlen = row->rlen - start;
       if (printlen < 0)
         printlen = 0;
-      else if (printlen > cfg.wincols + row->ilen)
-        printlen = cfg.wincols;
+      else if (printlen > E.wincols + row->ilen) {
+        printlen = E.wincols;
+        // ensure no incomplete utf chars at beginning of line
+        while (UTF_BODY_BYTE(E.rows[E.cy].render[start]))
+          start++;
+        // ensure no incomplete utf chars at end of line
+        while (UTF_BODY_BYTE(row->render[start + printlen]))
+          printlen -= 10;
+        if (UTF_HEAD_BYTE(row->render[start + printlen]))
+          printlen -= 10;
+      }
 
       // draw line number
-      char numstr[cfg.numoff];
-      int numlen = snprintf(numstr, cfg.numoff, "%zd", filerow + 1);
+      char numstr[E.numoff];
+      int numlen = snprintf(numstr, E.numoff, "%zd", filerow + 1);
       ab_strcat(ab, ESC_SEQ "31m", 5); // color line numbers
-      while (numlen++ < cfg.numoff - 1) {
+      while (numlen++ < E.numoff - 1) {
         ab_charcat(ab, ' ');
       }
-      ab_strcat(ab, numstr, cfg.numoff - 1);
+      ab_strcat(ab, numstr, E.numoff - 1);
       ab_strcat(ab, ESC_SEQ "m", 3); // reset colors
       ab_charcat(ab, ' ');
 
       // draw row
-      ab_strcat(ab, row->render + cfg.coloff, printlen);
+      ab_strcat(ab, &row->render[start], printlen);
     }
 
     ab_strcat(ab, ESC_SEQ "K", 3); // clear line being drawn
@@ -437,14 +449,14 @@ void refresh_screen() {
   ab_strcat(&ab, ESC_SEQ "H", 3);    // move cursor to top left
 
   set_numoff();
-  draw_top_status(&ab);
+  draw_upper_status(&ab);
   draw_rows(&ab);
-  draw_bot_status(&ab);
+  draw_lower_status(&ab);
 
   // position cursor
   char buf[64] = "";
-  ssize_t crow = cfg.cy - cfg.rowoff + 2; // extra 1 for top status bar
-  ssize_t ccol = cfg.rx - cfg.coloff + cfg.numoff + 1;
+  ssize_t crow = E.cy - E.rowoff + 2; // extra 1 for top status bar
+  ssize_t ccol = E.rx - E.coloff + E.numoff + 1;
   snprintf(buf, sizeof(buf), ESC_SEQ "%zd;%zdH", crow, ccol);
   ab_strcat(&ab, buf, strlen(buf));
 
@@ -491,35 +503,35 @@ void update_row(textrow *row) {
 }
 
 void insert_row(ssize_t at, char *s, size_t len) {
-  if (at < 0 || at > cfg.nrows)
+  if (at < 0 || at > E.nrows)
     return;
-  if (!(cfg.rows = realloc(cfg.rows, sizeof(textrow) * (cfg.nrows + 1))))
+  if (!(E.rows = realloc(E.rows, sizeof(textrow) * (E.nrows + 1))))
     die("realloc");
-  memmove(&cfg.rows[at + 1], &cfg.rows[at], sizeof(textrow) * (cfg.nrows - at));
+  memmove(&E.rows[at + 1], &E.rows[at], sizeof(textrow) * (E.nrows - at));
 
-  cfg.rows[at].len = len;
-  if (!(cfg.rows[at].chars = malloc(len + 1)))
+  E.rows[at].len = len;
+  if (!(E.rows[at].chars = malloc(len + 1)))
     die("malloc");
-  memcpy(cfg.rows[at].chars, s, len);
-  cfg.rows[at].chars[len] = '\0';
+  memcpy(E.rows[at].chars, s, len);
+  E.rows[at].chars[len] = '\0';
 
-  cfg.rows[at].rlen = 0;
-  cfg.rows[at].render = NULL;
-  update_row(&cfg.rows[at]);
+  E.rows[at].rlen = 0;
+  E.rows[at].render = NULL;
+  update_row(&E.rows[at]);
 
-  cfg.nrows++;
-  cfg.dirty++;
+  E.nrows++;
+  E.dirty++;
 }
 
 void del_row(ssize_t at) {
-  if (at < 0 || at >= cfg.nrows)
+  if (at < 0 || at >= E.nrows)
     return;
-  free(cfg.rows[at].chars);
-  free(cfg.rows[at].render);
-  size_t rowsize = sizeof(textrow) * (cfg.nrows - at - 1);
-  memmove(&cfg.rows[at], &cfg.rows[at + 1], rowsize);
-  cfg.nrows--;
-  cfg.dirty++;
+  free(E.rows[at].chars);
+  free(E.rows[at].render);
+  size_t rowsize = sizeof(textrow) * (E.nrows - at - 1);
+  memmove(&E.rows[at], &E.rows[at + 1], rowsize);
+  E.nrows--;
+  E.dirty++;
 }
 
 void row_strcat(textrow *row, char *s, size_t len) {
@@ -529,7 +541,7 @@ void row_strcat(textrow *row, char *s, size_t len) {
   row->len += len;
   row->chars[row->len] = '\0';
   update_row(row);
-  cfg.dirty++;
+  E.dirty++;
 }
 
 /* char logic */
@@ -544,7 +556,7 @@ void insert_char(textrow *row, ssize_t at, int c) {
   row->len++;
   row->chars[at] = c;
   update_row(row);
-  cfg.dirty++;
+  E.dirty++;
 }
 
 void delete_char(textrow *row, ssize_t at) {
@@ -553,16 +565,16 @@ void delete_char(textrow *row, ssize_t at) {
   memmove(&row->chars[at], &row->chars[at + 1], row->len - at);
   row->len--;
   update_row(row);
-  cfg.dirty++;
+  E.dirty++;
 }
 
 /* editor logic */
 
 void insert_at_cursor(int c) {
   // add new row if at end of last row
-  if (cfg.cy == cfg.nrows)
-    insert_row(cfg.nrows, "", 0);
-  insert_char(&cfg.rows[cfg.cy], cfg.cx++, c);
+  if (E.cy == E.nrows)
+    insert_row(E.nrows, "", 0);
+  insert_char(&E.rows[E.cy], E.cx++, c);
 }
 
 void backspace_at_cursor() {
@@ -589,18 +601,18 @@ void backspace_at_cursor() {
 }
 
 void newline_at_cursor() {
-  if (cfg.cx == 0) {
-    insert_row(cfg.cy, "", 0);
+  if (E.cx == 0) {
+    insert_row(E.cy, "", 0);
   } else {
-    textrow *row = &cfg.rows[cfg.cy];
-    insert_row(cfg.cy + 1, &row->chars[cfg.cx], row->len - cfg.cx);
-    row = &cfg.rows[cfg.cy];
-    row->len = cfg.cx;
+    textrow *row = &E.rows[E.cy];
+    insert_row(E.cy + 1, &row->chars[E.cx], row->len - E.cx);
+    row = &E.rows[E.cy];
+    row->len = E.cx;
     row->chars[row->len] = '\0';
     update_row(row);
   }
-  cfg.cy++;
-  cfg.cx = 0;
+  E.cy++;
+  E.cx = 0;
 }
 
 char *prompt(char *prompt, void (*callback)(char *, int)) {
@@ -691,7 +703,7 @@ void move_cursor(int key) {
 }
 
 void page_cursor(int key) {
-  int times = cfg.winrows;
+  int times = E.winrows;
   while (times-- > 0) {
     move_cursor(key == PAGE_UP ? ARROW_UP : ARROW_DOWN);
   }
@@ -730,39 +742,39 @@ void find_callback(char *query, int key) {
   if (last_match == -1)
     direction = 1;
 
-  for (ssize_t i = 0; i < cfg.nrows; i++) {
+  for (ssize_t i = 0; i < E.nrows; i++) {
     current += direction;
     if (current == -1)
-      current = cfg.nrows - 1;
-    else if (current == cfg.nrows)
+      current = E.nrows - 1;
+    else if (current == E.nrows)
       current = 0;
 
-    textrow *row = &cfg.rows[current];
+    textrow *row = &E.rows[current];
     char *match = strstr(row->render, query);
     if (match) {
       last_match = current;
-      cfg.cy = current;
-      cfg.cx = rx_to_cx(row, match - row->render);
-      cfg.rowoff = cfg.nrows;
+      E.cy = current;
+      E.cx = rx_to_cx(row, match - row->render);
+      E.rowoff = E.nrows;
       break;
     }
   }
 }
 
 void find() {
-  int orig_cx = cfg.cx;
-  int orig_cy = cfg.cy;
-  int orig_coloff = cfg.coloff;
-  int orig_rowoff = cfg.rowoff;
+  int orig_cx = E.cx;
+  int orig_cy = E.cy;
+  int orig_coloff = E.coloff;
+  int orig_rowoff = E.rowoff;
 
   char *query = prompt("find (next/prev with arrow keys): %s", find_callback);
 
   // jump to original cursor position
   if (!query || query[0] == '\0') {
-    cfg.cx = orig_cx;
-    cfg.cy = orig_cy;
-    cfg.coloff = orig_coloff;
-    cfg.rowoff = orig_rowoff;
+    E.cx = orig_cx;
+    E.cy = orig_cy;
+    E.coloff = orig_coloff;
+    E.rowoff = orig_rowoff;
   }
 
   free(query);
@@ -771,10 +783,10 @@ void find() {
 /* file i/o */
 
 int open_file(char *fname) {
-  free(cfg.filename);
-  cfg.filename = strdup(fname);
+  free(E.filename);
+  E.filename = strdup(fname);
 
-  FILE *fp = fopen(cfg.filename, "r");
+  FILE *fp = fopen(E.filename, "r");
   if (!fp)
     return -1;
 
@@ -786,12 +798,12 @@ int open_file(char *fname) {
   while ((len = getline(&line, &size, fp)) != -1) {
     while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
       len--;
-    insert_row(cfg.nrows, line, len);
+    insert_row(E.nrows, line, len);
   }
 
   free(line);
   fclose(fp);
-  cfg.dirty = 0;
+  E.dirty = 0;
   return 0;
 }
 
@@ -802,14 +814,14 @@ void write_file() {
   gid_t gid = getgid();
   int islink = 0;
 
-  if (cfg.filename == NULL) {
-    cfg.filename = prompt("save as: %s", NULL);
-    if (cfg.filename == NULL) {
+  if (E.filename == NULL) {
+    E.filename = prompt("save as: %s", NULL);
+    if (E.filename == NULL) {
       set_status_msg("write aborted");
       return;
     }
   } else {
-    if (lstat(cfg.filename, &st) == -1) {
+    if (lstat(E.filename, &st) == -1) {
       REPORT_ERR("stat error");
     } else {
       fmode = st.st_mode;
@@ -820,7 +832,7 @@ void write_file() {
   }
 
   // create tmp file to write everything to
-  char *tmpname = strdup(cfg.filename);
+  char *tmpname = strdup(E.filename);
   tmpname = strcat(tmpname, ".XXXXXX");
   int fd = mkstemp(tmpname);
   if (fd == -1) {
@@ -829,14 +841,14 @@ void write_file() {
   }
 
   // write lines to tmp file
-  for (ssize_t i = 0; i < cfg.nrows; i++) {
-    ssize_t len = cfg.rows[i].len;
-    if (write(fd, cfg.rows[i].chars, len) != len) {
+  for (ssize_t i = 0; i < E.nrows; i++) {
+    ssize_t len = E.rows[i].len;
+    if (write(fd, E.rows[i].chars, len) != len) {
       REPORT_ERR("write error");
       close(fd);
       return;
     }
-    if (i < cfg.nrows - 1 && write(fd, "\n", 1) != 1) {
+    if (i < E.nrows - 1 && write(fd, "\n", 1) != 1) {
       REPORT_ERR("write error");
       close(fd);
       return;
@@ -846,7 +858,7 @@ void write_file() {
   // expand target path if symlink
   char real[PATH_MAX + 1];
   if (islink) {
-    ssize_t len = readlink(cfg.filename, real, PATH_MAX);
+    ssize_t len = readlink(E.filename, real, PATH_MAX);
     if (len == -1) {
       REPORT_ERR("readlink error");
       close(fd);
@@ -854,7 +866,7 @@ void write_file() {
     }
     real[len] = '\0';
   } else {
-    strcpy(real, cfg.filename);
+    strcpy(real, E.filename);
   }
 
   // rename tmp to target
@@ -871,15 +883,15 @@ void write_file() {
     REPORT_ERR("stat error");
 
   // stat again to get final filesize
-  if (stat(cfg.filename, &st) == -1)
+  if (stat(E.filename, &st) == -1)
     REPORT_ERR("stat error");
   set_status_msg("wrote %lld bytes", st.st_size);
   close(fd);
-  cfg.dirty = 0;
+  E.dirty = 0;
 }
 
 void quit(int tries_left, int status) {
-  if (cfg.dirty && tries_left) {
+  if (E.dirty && tries_left) {
     char *fmt = "Unsaved changes in buffer! (press ^X %d more %s to quit)";
     char *noun = (tries_left == 1) ? "time" : "times";
     set_status_msg(fmt, tries_left, noun);
@@ -988,11 +1000,11 @@ void handle_key() {
     break;
 
   case HOME_KEY:
-    cfg.cx = 0;
+    E.cx = 0;
     break;
   case END_KEY:
-    if (cfg.cy < cfg.nrows)
-      cfg.cx = cfg.rows[cfg.cy].len;
+    if (E.cy < E.nrows)
+      E.cx = E.rows[E.cy].len;
     break;
 
   case DEL_KEY:
@@ -1006,11 +1018,11 @@ void handle_key() {
   case PAGE_UP:
   case PAGE_DOWN: {
     if (c == PAGE_UP) {
-      cfg.cy = cfg.rowoff;
+      E.cy = E.rowoff;
     } else if (c == PAGE_DOWN) {
-      cfg.cy = cfg.rowoff + cfg.winrows - 1;
-      if (cfg.cy > cfg.nrows)
-        cfg.cy = cfg.nrows;
+      E.cy = E.rowoff + E.winrows - 1;
+      if (E.cy > E.nrows)
+        E.cy = E.nrows;
     }
     page_cursor(c);
     break;
