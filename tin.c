@@ -566,25 +566,25 @@ void insert_at_cursor(int c) {
 }
 
 void backspace_at_cursor() {
-  if (cfg.cx == 0 && cfg.cy == 0)
+  if (E.cx == 0 && E.cy == 0)
     return;
-  if (cfg.cy == cfg.nrows)
+  if (E.cy == E.nrows)
     return;
 
-  textrow *row = &cfg.rows[cfg.cy];
-  if (cfg.cx > 0) {
+  textrow *row = &E.rows[E.cy];
+  if (E.cx > 0) {
     // backspace multiple times to get rid of full unicode chars
-    while (UTF_BODY_BYTE(row->chars[cfg.cx - 1])) {
-      delete_char(row, cfg.cx - 1);
-      cfg.cx--;
+    while (UTF_BODY_BYTE(row->chars[E.cx - 1])) {
+      delete_char(row, E.cx - 1);
+      E.cx--;
     }
-    delete_char(row, cfg.cx - 1);
-    cfg.cx--;
+    delete_char(row, E.cx - 1);
+    E.cx--;
   } else {
-    cfg.cx = cfg.rows[cfg.cy - 1].len;
-    row_strcat(&cfg.rows[cfg.cy - 1], row->chars, row->len);
-    del_row(cfg.cy);
-    cfg.cy--;
+    E.cx = E.rows[E.cy - 1].len;
+    row_strcat(&E.rows[E.cy - 1], row->chars, row->len);
+    del_row(E.cy);
+    E.cy--;
   }
 }
 
@@ -645,46 +645,49 @@ char *prompt(char *prompt, void (*callback)(char *, int)) {
 /* navigation */
 
 void move_cursor(int key) {
-  textrow *row = (cfg.cy < cfg.nrows) ? &cfg.rows[cfg.cy] : NULL;
+  textrow *row = (E.cy < E.nrows) ? &E.rows[E.cy] : NULL;
   switch (key) {
   case ARROW_UP:
-    if (cfg.cy)
-      cfg.cy--;
+    if (E.cy)
+      E.cy--;
     break;
   case ARROW_DOWN:
-    if (cfg.cy < cfg.nrows)
-      cfg.cy++;
+    if (E.cy < E.nrows)
+      E.cy++;
     break;
   case ARROW_LEFT:
-    if (cfg.cx) {
-      cfg.cx--;
-      // always move cursor to head of full unicode char
-      while (cfg.cx > 1 && UTF_BODY_BYTE(row->chars[cfg.cx]))
-        cfg.cx--;
-    } else if (cfg.cy > 0) {
+    if (E.cx) {
+      E.cx--;
+    } else if (E.cy > 0) {
       // don't move up if at top
-      cfg.cy--;
-      cfg.cx = cfg.rows[cfg.cy].len;
+      E.cy--;
+      E.cx = E.rows[E.cy].len;
     }
     break;
   case ARROW_RIGHT:
-    if (row && cfg.cx < row->len) {
-      cfg.cx++;
-      // always move cursor past full unicode char
-      while (cfg.cx < row->len && UTF_BODY_BYTE(row->chars[cfg.cx]))
-        cfg.cx++;
-    } else if (row && cfg.cx == row->len) {
+    if (row && E.cx < row->len) {
+      E.cx++;
+    } else if (row && E.cx == row->len) {
       // don't move down if at bottom
-      cfg.cy++;
-      cfg.cx = 0;
+      E.cy++;
+      E.cx = 0;
     }
     break;
   }
 
-  row = (cfg.cy < cfg.nrows) ? &cfg.rows[cfg.cy] : NULL;
+  row = (E.cy < E.nrows) ? &E.rows[E.cy] : NULL;
+
+  // always move cursor to head of full unicode char
+  // at the moment, no good way of telling which way to go for up/down
+  while (row && E.cx && UTF_BODY_BYTE(row->chars[E.cx]))
+    if (key == ARROW_RIGHT)
+      E.cx++;
+    else
+      E.cx--;
+
   ssize_t len = row ? row->len : 0;
-  if (cfg.cx > len)
-    cfg.cx = len;
+  if (E.cx > len)
+    E.cx = len;
 }
 
 void page_cursor(int key) {
