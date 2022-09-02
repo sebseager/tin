@@ -15,6 +15,7 @@ In no particular order:
 - [x] Adjust editor size when window is resized
 - [x] Status bar with filename, cursor information, and status messages
 - [x] Take nonexistent filename argument as new file
+- [ ] Keep track of changes per-line to avoid unnecessary updates
 - [ ] Copy/cut/paste
 - [ ] Unicode (UTF8) support
 - [ ] Auto-indent if previous line began with tabs
