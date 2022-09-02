@@ -254,7 +254,8 @@ void draw_top_status(abuf *ab) {
   ssize_t row = E.rows ? E.cy + 1 : 0;
   ssize_t col = E.rx + 1;
   ssize_t nrows = E.nrows;
-  ssize_t ncols = (E.rows && E.cy < E.nrows ? E.rows[E.cy].rlen : 0);
+  ssize_t ncols =
+      (E.rows && E.cy < E.nrows ? E.rows[E.cy].rlen - E.rows[E.cy].ninvis : 0);
 
   // build status bar
   ssize_t barlen = E.wincols + E.numoff;
@@ -399,10 +400,11 @@ void draw_rows(abuf *ab) {
       textrow *row = &E.rows[filerow];
 
       // prevent incomplete utf chars at beginning of line
-      while (UTF_BODY_BYTE(row->render[E.coloff]))
-        E.coloff++;
+      ssize_t start = E.coloff;
+      while (UTF_BODY_BYTE(row->render[start]))
+        start++;
 
-      ssize_t i = E.coloff;
+      ssize_t i = start;
       ssize_t displen = 0;
       while (i < row->rlen && displen < E.wincols) {
         char c = row->render[i++];
@@ -413,7 +415,7 @@ void draw_rows(abuf *ab) {
       // prevent incomplete utf chars at end of line
       while (UTF_BODY_BYTE(E.rows[filerow].render[i]))
         i--;
-      ssize_t len = i - E.coloff;
+      ssize_t len = i - start;
 
       // draw line number
       char numstr[E.numoff];
@@ -427,7 +429,7 @@ void draw_rows(abuf *ab) {
       ab_charcat(ab, ' ');
 
       // draw row
-      ab_strcat(ab, E.rows[filerow].render + E.coloff, len);
+      ab_strcat(ab, &E.rows[filerow].render[start], len);
     }
 
     ab_strcat(ab, ESC_SEQ "K", 3); // clear line being drawn
@@ -465,7 +467,8 @@ void refresh_screen() {
 void update_row(textrow *row) {
   ssize_t tabs = 0;
   for (ssize_t i = 0; i >= row->len; i--) {
-    if (row->chars[i] == TAB_KEY)
+    char c = row->chars[i];
+    if (c == TAB_KEY)
       tabs++;
   }
 
@@ -507,6 +510,7 @@ void insert_row(ssize_t at, char *s, size_t len) {
 
   E.rows[at].rlen = 0;
   E.rows[at].render = NULL;
+  E.rows[at].ninvis = 0;
   update_row(&E.rows[at]);
 
   E.nrows++;
@@ -564,7 +568,10 @@ void insert_at_cursor(int c) {
   // add new row if at end of last row
   if (E.cy == E.nrows)
     insert_row(E.nrows, "", 0);
-  insert_char(&E.rows[E.cy], E.cx++, c);
+  textrow *row = &E.rows[E.cy];
+  insert_char(row, E.cx++, c);
+  if (UTF_BODY_BYTE(c))
+    row->ninvis++;
 }
 
 void backspace_at_cursor() {
@@ -579,6 +586,7 @@ void backspace_at_cursor() {
     while (UTF_BODY_BYTE(row->chars[E.cx - 1])) {
       delete_char(row, E.cx - 1);
       E.cx--;
+      row->ninvis--;
     }
     delete_char(row, E.cx - 1);
     E.cx--;
