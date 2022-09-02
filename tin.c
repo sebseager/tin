@@ -22,7 +22,7 @@
 #define TIN_VERSION "0.1.0"
 #define TIN_TAB_STOP 4
 #define TIN_STATUS_MSG_SECS 2
-#define TIN_QUIT_TIMES 3
+#define TIN_QUIT_TIMES 2
 #define ESC_SEQ "\x1b["
 #define CTRL_KEY(key) (0x1f & (key))
 #define REPORT_ERR(msg) (set_status_msg(msg ": %s", strerror(errno)))
@@ -58,7 +58,6 @@ enum named_key {
 
 typedef struct textrow {
   ssize_t len;  // number of raw chars
-  ssize_t ilen; // number of invisible raw chars (e.g. utf extra bytes)
   char *chars;  // raw chars
   ssize_t rlen; // number of rendered chars (e.g. tabs show as spaces)
   char *render; // rendered chars
@@ -244,7 +243,7 @@ void enable_raw_tty() {
 
 /* status bar */
 
-void draw_upper_status(abuf *ab) {
+void draw_top_status(abuf *ab) {
   ab_strcat(ab, ESC_SEQ "7m", 4); // reverse colors
 
   // calculate components
@@ -253,8 +252,7 @@ void draw_upper_status(abuf *ab) {
   ssize_t row = E.rows ? E.cy + 1 : 0;
   ssize_t col = E.rx + 1;
   ssize_t nrows = E.nrows;
-  ssize_t ncols =
-      (E.rows && E.cy < E.nrows ? E.rows[E.cy].rlen - E.rows[E.cy].ilen : 0);
+  ssize_t ncols = (E.rows && E.cy < E.nrows ? E.rows[E.cy].rlen : 0);
 
   // build status bar
   ssize_t barlen = E.wincols + E.numoff;
@@ -275,7 +273,7 @@ void draw_upper_status(abuf *ab) {
   ab_strcat(ab, ESC_SEQ "m", 3); // reset colors
 }
 
-void draw_lower_status(abuf *ab) {
+void draw_bot_status(abuf *ab) {
   ab_strcat(ab, ESC_SEQ "K", 3);  // clear message bar
   ab_strcat(ab, ESC_SEQ "7m", 4); // reverse colors
 
@@ -312,8 +310,6 @@ ssize_t cx_to_rx(textrow *row, ssize_t cx) {
     char c = row->chars[j];
     if (c == TAB_KEY)
       rx += TIN_TAB_STOP - (rx % TIN_TAB_STOP);
-    else if (UTF_HEAD_BYTE(c))
-      rx += 1;
     else if (UTF_BODY_BYTE(c))
       continue;
     else
@@ -328,8 +324,6 @@ ssize_t rx_to_cx(textrow *row, int rx) {
     char c = row->chars[cx];
     if (c == TAB_KEY)
       cur_rx += TIN_TAB_STOP - (cur_rx % TIN_TAB_STOP);
-    else if (UTF_HEAD_BYTE(c))
-      cur_rx += 1;
     else if (UTF_BODY_BYTE(c))
       continue;
     else
@@ -373,22 +367,19 @@ void scroll() {
   // calculate index into render buffer
   // differs from cx if line contains tabs
   E.rx = 0;
-  if (E.cy < E.nrows)
+  if (E.cy < E.nrows) {
     E.rx = cx_to_rx(&E.rows[E.cy], E.cx);
+  }
 
   // adjust offsets if cursor if off screen
-  if (E.cy < E.rowoff) {
+  if (E.cy < E.rowoff)
     E.rowoff = E.cy;
-  }
-  if (E.cy >= E.rowoff + E.winrows) {
+  if (E.cy >= E.rowoff + E.winrows)
     E.rowoff = E.cy - E.winrows + 1;
-  }
-  if (E.rx < E.coloff) {
+  if (E.rx < E.coloff)
     E.coloff = E.rx;
-  }
-  if (E.rx >= E.coloff + E.wincols) {
+  if (E.rx >= E.coloff + E.wincols)
     E.coloff = E.rx - E.wincols + 1;
-  }
 }
 
 void draw_rows(abuf *ab) {
@@ -403,22 +394,11 @@ void draw_rows(abuf *ab) {
         ab_strcat(ab, "~", 1);
       }
     } else {
-      textrow *row = &E.rows[filerow];
-      ssize_t start = E.coloff;
-      ssize_t printlen = row->rlen - start;
-      if (printlen < 0)
-        printlen = 0;
-      else if (printlen > E.wincols + row->ilen) {
-        printlen = E.wincols;
-        // ensure no incomplete utf chars at beginning of line
-        while (UTF_BODY_BYTE(E.rows[E.cy].render[start]))
-          start++;
-        // ensure no incomplete utf chars at end of line
-        while (UTF_BODY_BYTE(row->render[start + printlen]))
-          printlen -= 10;
-        if (UTF_HEAD_BYTE(row->render[start + printlen]))
-          printlen -= 10;
-      }
+      ssize_t len = E.rows[filerow].rlen - E.coloff;
+      if (len < 0)
+        len = 0;
+      else if (len > E.wincols)
+        len = E.wincols;
 
       // draw line number
       char numstr[E.numoff];
@@ -432,7 +412,7 @@ void draw_rows(abuf *ab) {
       ab_charcat(ab, ' ');
 
       // draw row
-      ab_strcat(ab, &row->render[start], printlen);
+      ab_strcat(ab, E.rows[filerow].render + E.coloff, len);
     }
 
     ab_strcat(ab, ESC_SEQ "K", 3); // clear line being drawn
@@ -449,9 +429,9 @@ void refresh_screen() {
   ab_strcat(&ab, ESC_SEQ "H", 3);    // move cursor to top left
 
   set_numoff();
-  draw_upper_status(&ab);
+  draw_top_status(&ab);
   draw_rows(&ab);
-  draw_lower_status(&ab);
+  draw_bot_status(&ab);
 
   // position cursor
   char buf[64] = "";
@@ -468,22 +448,20 @@ void refresh_screen() {
 /* row logic */
 
 void update_row(textrow *row) {
-  ssize_t rsize = row->len;
-  row->ilen = 0;
+  // render tabs as spaces
+  ssize_t tabs = 0;
   for (ssize_t j = 0; j < row->len; j++) {
     char c = row->chars[j];
     if (c == TAB_KEY)
-      rsize += TIN_TAB_STOP - 1;
-    if (UTF_BODY_BYTE(c))
-      row->ilen++;
+      tabs++;
   }
 
+  ssize_t rsize = row->len + tabs * (TIN_TAB_STOP - 1);
   free(row->render);
   row->render = malloc(rsize + 1);
   if (!row->render)
     die("malloc");
 
-  // render tabs as spaces
   ssize_t i = 0;
   for (ssize_t j = 0; j < row->len; j++) {
     switch (row->chars[j]) {
@@ -578,6 +556,9 @@ void insert_at_cursor(int c) {
 }
 
 void backspace_at_cursor() {
+  FILE *fp = fopen("debug.tmp", "a");
+  fprintf(fp, "backspace_at_cursor\n");
+  fclose(fp);
   if (E.cx == 0 && E.cy == 0)
     return;
   if (E.cy == E.nrows)
@@ -668,19 +649,18 @@ void move_cursor(int key) {
       E.cy++;
     break;
   case ARROW_LEFT:
-    if (E.cx) {
+    if (E.cx)
       E.cx--;
-    } else if (E.cy > 0) {
+    else if (E.cy > 0) {
       // don't move up if at top
       E.cy--;
       E.cx = E.rows[E.cy].len;
     }
     break;
   case ARROW_RIGHT:
-    if (row && E.cx < row->len) {
+    if (row && E.cx < row->len)
       E.cx++;
-    } else if (row && E.cx == row->len) {
-      // don't move down if at bottom
+    else if (row && E.cx == row->len) {
       E.cy++;
       E.cx = 0;
     }
@@ -1008,6 +988,7 @@ void handle_key() {
     break;
 
   case DEL_KEY:
+    // TODO: this doesn't work for iTerm2
     move_cursor(ARROW_RIGHT);
     // fallthrough
   case BACKSPACE:
