@@ -57,10 +57,11 @@ enum named_key {
 };
 
 typedef struct textrow {
-  ssize_t len;  // number of raw chars
-  char *chars;  // raw chars
-  ssize_t rlen; // number of rendered chars (e.g. tabs show as spaces)
-  char *render; // rendered chars
+  ssize_t len;    // number of raw chars
+  char *chars;    // raw chars
+  ssize_t rlen;   // number of rendered chars (e.g. tabs show as spaces)
+  char *render;   // rendered chars
+  ssize_t ninvis; // number of invisible chars (e.g. utf body bytes)
 } textrow;
 
 /* prototypes */
@@ -401,7 +402,6 @@ void draw_rows(abuf *ab) {
       while (UTF_BODY_BYTE(row->render[E.coloff]))
         E.coloff++;
 
-      // utf chars have multiple bytes, so can show more than E.wincols
       ssize_t i = E.coloff;
       ssize_t displen = 0;
       while (i < row->rlen && displen < E.wincols) {
@@ -413,42 +413,7 @@ void draw_rows(abuf *ab) {
       // prevent incomplete utf chars at end of line
       while (UTF_BODY_BYTE(E.rows[filerow].render[i]))
         i--;
-
       ssize_t len = i - E.coloff;
-
-      // ssize_t len = row->rlen - E.coloff;
-      // len += row->icounts[0] - row->icounts[E.coloff];
-      // if (len < 0)
-      //   len = 0;
-      // ssize_t width = E.wincols;
-      // width -= row->icounts[E.coloff] - row->icounts[E.coloff + E.wincols];
-
-      // ssize_t end = E.coloff + E.wincols;
-      // if (end >= E.rows[filerow].rlen)
-      //   end = E.rows[filerow].rlen - 1;
-      // ssize_t invislen =
-      //     E.rows[filerow].icounts[E.coloff] - E.rows[filerow].icounts[end];
-      // if (len < 0)
-      //   len = 0;
-      // if (len > E.wincols + invislen)
-      //   len = E.wincols + invislen;
-
-      // ssize_t end = E.coloff + E.wincols;
-      // if (end > E.rows[filerow].rlen)
-      //   end = E.rows[filerow].rlen - 1;
-      // ssize_t invislen =
-      //     E.rows[filerow].icounts[end] - E.rows[filerow].icounts[E.coloff];
-      // ssize_t len = end - E.coloff;
-
-      // // ssize_t len = E.rows[filerow].rlen - E.coloff;
-      // // if (len < 0)
-      // //   len = 0;
-      // // else if (len > E.wincols + invislen)
-      // //   len = E.wincols + invislen;
-
-      FILE *fp = fopen("debug.tmp", "a");
-      fprintf(fp, "len: %zd, coloff: %zd\n", len, E.coloff);
-      fclose(fp);
 
       // draw line number
       char numstr[E.numoff];
@@ -503,16 +468,6 @@ void update_row(textrow *row) {
     if (row->chars[i] == TAB_KEY)
       tabs++;
   }
-
-  // // keep track of number of invisible chars ahead of each render index
-  // ssize_t icount = 0;
-  // free(row->icounts);
-  // row->icounts = malloc(row->rlen * sizeof(ssize_t));
-  // for (ssize_t i = row->rlen - 1; i >= 0; i--) {
-  //   if (UTF_BODY_BYTE(row->render[i]))
-  //     icount++;
-  //   row->icounts[i] = icount;
-  // }
 
   ssize_t rsize = row->len + tabs * (TIN_TAB_STOP - 1);
   free(row->render);
