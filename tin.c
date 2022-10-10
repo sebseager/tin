@@ -433,10 +433,10 @@ void draw_rows(abuf *ab) {
         if (VISIBLE_BYTE(c))
           displen++;
       }
+      llong_t end = i;
 
       // draw row
-      llong_t len = i - start;
-      ab_strcat(ab, &E.rows[filerow].render[start], len);
+      ab_strcat(ab, &E.rows[filerow].render[start], end - start);
     }
 
     ab_strcat(ab, ESC_SEQ "K", 3); // clear line being drawn
@@ -694,6 +694,12 @@ void move_cursor(int key) {
   }
 
   row = (E.cy < E.nrows) ? &E.rows[E.cy] : NULL;
+
+  // if moved up or down, ensure cursor stays in the same column
+  // e.g. if moving on or off of a utf char or a tab
+  if (row && (key == ARROW_UP || key == ARROW_DOWN)) {
+    E.cx = rx_to_cx(row, E.rx);
+  }
 
   // always move cursor to head of full unicode char
   while (row && E.cx && UTF_BODY_BYTE(row->chars[E.cx])) {
