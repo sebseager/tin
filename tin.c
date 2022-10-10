@@ -19,7 +19,7 @@
 
 /* defines */
 
-#define TIN_VERSION "0.1.0"
+#define TIN_VERSION "0.2.1"
 #define TIN_TAB_STOP 4
 #define TIN_STATUS_MSG_SECS 2
 #define TIN_QUIT_TIMES 2
