@@ -410,20 +410,19 @@ void draw_rows(abuf *ab) {
 
       llong_t displen, i;
       displen = i = 0;
-      while (i < row->rlen && displen < E.coloff) {
+      while (i < row->rlen && displen <= E.coloff) {
         char c = row->render[i++];
         if (UTF_HEAD_BYTE(c) || !UTF_BODY_BYTE(c))
           displen++;
       }
-
-      llong_t start = displen;
+      llong_t start = --i;
       displen = 0;
       while (i < row->rlen && displen + E.lnmargin < E.wincols) {
         char c = row->render[i++];
         if (UTF_HEAD_BYTE(c) || !UTF_BODY_BYTE(c))
           displen++;
       }
-      llong_t end = start + displen;
+      llong_t end = i;
 
       // for (llong_t i = 0; i < row->rlen; i++) {
       //   if (displen == E.coloff) {
