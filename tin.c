@@ -67,6 +67,23 @@ typedef struct textrow {
   llong_t ninvis; // number of invisible chars (e.g. utf body bytes)
 } textrow;
 
+struct config {
+  llong_t cx, cy;           // cursor position
+  llong_t rx;               // horizontal cursor render position
+  llong_t winrows, wincols; // window size
+  llong_t rowoff, coloff;   // scroll offsets
+  llong_t numoff;           // line number offset
+  llong_t nrows;            // number of text rows
+  textrow *rows;            // text lines
+  char *filename;           // filename
+  char statusmsg[128];      // status message
+  time_t statusmsg_time;    // time status message was last updated
+  ullong_t dirty;           // number of changes since last save
+  struct termios orig_tty;
+};
+
+struct config E; // global editor config
+
 /* prototypes */
 
 int read_key();
@@ -78,6 +95,14 @@ void die(const char *s) {
   clear_tty();
   perror(s);
   exit(1);
+}
+
+void set_status_msg(const char *fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  vsnprintf(E.statusmsg, sizeof(E.statusmsg), fmt, ap);
+  va_end(ap);
+  E.statusmsg_time = time(NULL);
 }
 
 int nplaces(llong_t n) {
@@ -122,24 +147,7 @@ int nplaces(llong_t n) {
   return 19;
 }
 
-/* config */
-
-struct config {
-  llong_t cx, cy;           // cursor position
-  llong_t rx;               // horizontal cursor render position
-  llong_t winrows, wincols; // window size
-  llong_t rowoff, coloff;   // scroll offsets
-  llong_t numoff;           // line number offset
-  llong_t nrows;            // number of text rows
-  textrow *rows;            // text lines
-  char *filename;           // filename
-  char statusmsg[128];      // status message
-  time_t statusmsg_time;    // time status message was last updated
-  ullong_t dirty;           // number of changes since last save
-  struct termios orig_tty;
-};
-
-struct config E;
+/* terminal config */
 
 int cursor_pos(llong_t *rows, llong_t *cols) {
   if (write(STDOUT_FILENO, ESC_SEQ "6n", 4) != 4)
@@ -188,6 +196,7 @@ void set_editor_size() {
     die("measure_window");
   E.winrows -= 2; // for status bar and status message
   set_numoff();
+  set_status_msg("%lld %lld", E.winrows, E.wincols);
 }
 
 void init_config() {
@@ -202,7 +211,7 @@ void init_config() {
   set_editor_size();
 }
 
-/* terminal control */
+/* tty control */
 
 void clear_tty() {
   write(STDOUT_FILENO, ESC_SEQ "2J", 4); // clear screen
@@ -262,13 +271,12 @@ void draw_top_status(abuf *ab) {
 
   // build status bar
   llong_t barlen = E.wincols + E.numoff;
-  char *lfmt = "[%s] %.20s";
-  char *rfmt = "line %zd/%zd, col %zd/%zd";
   char lmsg[barlen + 1], rmsg[barlen + 1];
   llong_t rlen = barlen;
-  rlen = snprintf(rmsg, rlen, rfmt, row, nrows, col, ncols);
+  rlen = snprintf(rmsg, rlen, "line %lld/%lld, col %lld/%lld", row, nrows, col,
+                  ncols);
   llong_t llen = barlen - rlen;
-  llen = snprintf(lmsg, llen, lfmt, dirty, fname);
+  llen = snprintf(lmsg, llen, "[%s] %.20s", dirty, fname);
 
   // write status bar
   ab_strcat(ab, lmsg, llen);
@@ -298,14 +306,6 @@ void draw_bot_status(abuf *ab) {
     ab_strcat(ab, " ", 1);
 
   ab_strcat(ab, ESC_SEQ "m", 3); // reset colors
-}
-
-void set_status_msg(const char *fmt, ...) {
-  va_list ap;
-  va_start(ap, fmt);
-  vsnprintf(E.statusmsg, sizeof(E.statusmsg), fmt, ap);
-  va_end(ap);
-  E.statusmsg_time = time(NULL);
 }
 
 /* main interface */
