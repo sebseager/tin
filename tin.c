@@ -56,12 +56,15 @@ enum named_key {
   PAGE_DOWN,
 };
 
+typedef long long llong_t;
+typedef unsigned long long ullong_t;
+
 typedef struct textrow {
-  ssize_t len;    // number of raw chars
+  llong_t len;    // number of raw chars
   char *chars;    // raw chars
-  ssize_t rlen;   // number of rendered chars (e.g. tabs show as spaces)
+  llong_t rlen;   // number of rendered chars (e.g. tabs show as spaces)
   char *render;   // rendered chars
-  ssize_t ninvis; // number of invisible chars (e.g. utf body bytes)
+  llong_t ninvis; // number of invisible chars (e.g. utf body bytes)
 } textrow;
 
 /* prototypes */
@@ -77,7 +80,7 @@ void die(const char *s) {
   exit(1);
 }
 
-int nplaces(ssize_t n) {
+int nplaces(llong_t n) {
   if (n < 0)
     n = (n == INT_MIN) ? INT_MAX : -n;
   if (n < 10)
@@ -122,23 +125,23 @@ int nplaces(ssize_t n) {
 /* config */
 
 struct config {
-  ssize_t cx, cy;           // cursor position
-  ssize_t rx;               // horizontal cursor render position
-  ssize_t winrows, wincols; // window size
-  ssize_t rowoff, coloff;   // scroll offsets
-  ssize_t numoff;           // line number offset
-  ssize_t nrows;            // number of text rows
+  llong_t cx, cy;           // cursor position
+  llong_t rx;               // horizontal cursor render position
+  llong_t winrows, wincols; // window size
+  llong_t rowoff, coloff;   // scroll offsets
+  llong_t numoff;           // line number offset
+  llong_t nrows;            // number of text rows
   textrow *rows;            // text lines
   char *filename;           // filename
   char statusmsg[128];      // status message
   time_t statusmsg_time;    // time status message was last updated
-  size_t dirty;             // number of changes since last save
+  ullong_t dirty;           // number of changes since last save
   struct termios orig_tty;
 };
 
 struct config E;
 
-int cursor_pos(ssize_t *rows, ssize_t *cols) {
+int cursor_pos(llong_t *rows, llong_t *cols) {
   if (write(STDOUT_FILENO, ESC_SEQ "6n", 4) != 4)
     return -1;
 
@@ -154,13 +157,13 @@ int cursor_pos(ssize_t *rows, ssize_t *cols) {
   // see https://vt100.net/docs/vt100-ug/chapter3.html#CPR
   if (buf[0] != ESC_SEQ[0] || buf[1] != ESC_SEQ[1])
     return -1;
-  if (sscanf(&buf[2], "%zd;%zd", rows, cols) != 2)
+  if (sscanf(&buf[2], "%lld;%lld", rows, cols) != 2)
     return -1;
 
   return 0;
 }
 
-int measure_window(ssize_t *rows, ssize_t *cols) {
+int measure_window(llong_t *rows, llong_t *cols) {
   struct winsize ws;
   if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0) {
     // try to check window size by moving cursor to bottom right
@@ -251,25 +254,25 @@ void draw_top_status(abuf *ab) {
   // calculate components
   char *fname = E.filename ? E.filename : "[New]";
   char *dirty = E.dirty ? "*" : " ";
-  ssize_t row = E.rows ? E.cy + 1 : 0;
-  ssize_t col = E.rx + 1;
-  ssize_t nrows = E.nrows;
-  ssize_t ncols =
+  llong_t row = E.rows ? E.cy + 1 : 0;
+  llong_t col = E.rx + 1;
+  llong_t nrows = E.nrows;
+  llong_t ncols =
       (E.rows && E.cy < E.nrows ? E.rows[E.cy].rlen - E.rows[E.cy].ninvis : 0);
 
   // build status bar
-  ssize_t barlen = E.wincols + E.numoff;
+  llong_t barlen = E.wincols + E.numoff;
   char *lfmt = "[%s] %.20s";
   char *rfmt = "line %zd/%zd, col %zd/%zd";
   char lmsg[barlen + 1], rmsg[barlen + 1];
-  ssize_t rlen = barlen;
+  llong_t rlen = barlen;
   rlen = snprintf(rmsg, rlen, rfmt, row, nrows, col, ncols);
-  ssize_t llen = barlen - rlen;
+  llong_t llen = barlen - rlen;
   llen = snprintf(lmsg, llen, lfmt, dirty, fname);
 
   // write status bar
   ab_strcat(ab, lmsg, llen);
-  ssize_t nspaces = barlen - rlen - llen;
+  llong_t nspaces = barlen - rlen - llen;
   while (nspaces-- > 0)
     ab_charcat(ab, ' ');
   ab_strcat(ab, rmsg, rlen);
@@ -284,13 +287,13 @@ void draw_bot_status(abuf *ab) {
   if (time(NULL) - E.statusmsg_time >= TIN_STATUS_MSG_SECS)
     E.statusmsg[0] = '\0';
 
-  ssize_t barlen = E.wincols + E.numoff;
-  ssize_t msglen = strlen(E.statusmsg);
+  llong_t barlen = E.wincols + E.numoff;
+  llong_t msglen = strlen(E.statusmsg);
   if (msglen > barlen)
     msglen = barlen;
   if (msglen)
     ab_strcat(ab, E.statusmsg, msglen);
-  size_t nspaces = barlen - msglen;
+  ullong_t nspaces = barlen - msglen;
   while (nspaces-- > 0)
     ab_strcat(ab, " ", 1);
 
@@ -307,9 +310,9 @@ void set_status_msg(const char *fmt, ...) {
 
 /* main interface */
 
-ssize_t cx_to_rx(textrow *row, ssize_t cx) {
-  ssize_t rx = 0;
-  for (ssize_t j = 0; j < cx; j++) {
+llong_t cx_to_rx(textrow *row, llong_t cx) {
+  llong_t rx = 0;
+  for (llong_t j = 0; j < cx; j++) {
     char c = row->chars[j];
     if (c == TAB_KEY)
       rx += TIN_TAB_STOP - (rx % TIN_TAB_STOP);
@@ -321,8 +324,8 @@ ssize_t cx_to_rx(textrow *row, ssize_t cx) {
   return rx;
 }
 
-ssize_t rx_to_cx(textrow *row, int rx) {
-  ssize_t cx, cur_rx = 0;
+llong_t rx_to_cx(textrow *row, int rx) {
+  llong_t cx, cur_rx = 0;
   for (cx = 0; cx < row->len; cx++) {
     char c = row->chars[cx];
     if (c == TAB_KEY)
@@ -389,7 +392,7 @@ void draw_rows(abuf *ab) {
   ab_strcat(ab, "\r\n", 2); // keep first line empty for status bar
 
   for (int y = 0; y < E.winrows; y++) {
-    ssize_t filerow = y + E.rowoff;
+    llong_t filerow = y + E.rowoff;
     if (filerow >= E.nrows) {
       if (E.nrows == 0 && y >= E.winrows / 3) {
         draw_welcome(ab, y - E.winrows / 3);
@@ -400,12 +403,12 @@ void draw_rows(abuf *ab) {
       textrow *row = &E.rows[filerow];
 
       // prevent incomplete utf chars at beginning of line
-      ssize_t start = E.coloff;
+      llong_t start = E.coloff;
       while (UTF_BODY_BYTE(row->render[start]))
         start++;
 
-      ssize_t i = start;
-      ssize_t displen = 0;
+      llong_t i = start;
+      llong_t displen = 0;
       while (i < row->rlen && displen < E.wincols) {
         char c = row->render[i++];
         if (!UTF_BODY_BYTE(c))
@@ -415,11 +418,11 @@ void draw_rows(abuf *ab) {
       // prevent incomplete utf chars at end of line
       while (UTF_BODY_BYTE(E.rows[filerow].render[i]))
         i--;
-      ssize_t len = i - start;
+      llong_t len = i - start;
 
       // draw line number
       char numstr[E.numoff];
-      int numlen = snprintf(numstr, E.numoff, "%zd", filerow + 1);
+      int numlen = snprintf(numstr, E.numoff, "%lld", filerow + 1);
       ab_strcat(ab, ESC_SEQ "31m", 5); // color line numbers
       while (numlen++ < E.numoff - 1) {
         ab_charcat(ab, ' ');
@@ -452,9 +455,9 @@ void refresh_screen() {
 
   // position cursor
   char buf[64] = "";
-  ssize_t crow = E.cy - E.rowoff + 2; // extra 1 for top status bar
-  ssize_t ccol = E.rx - E.coloff + E.numoff + 1;
-  snprintf(buf, sizeof(buf), ESC_SEQ "%zd;%zdH", crow, ccol);
+  llong_t crow = E.cy - E.rowoff + 2; // extra 1 for top status bar
+  llong_t ccol = E.rx - E.coloff + E.numoff + 1;
+  snprintf(buf, sizeof(buf), ESC_SEQ "%lld;%lldH", crow, ccol);
   ab_strcat(&ab, buf, strlen(buf));
 
   ab_strcat(&ab, ESC_SEQ "?25h", 6);    // show cursor
@@ -465,22 +468,22 @@ void refresh_screen() {
 /* row logic */
 
 void update_row(textrow *row) {
-  ssize_t tabs = 0;
-  for (ssize_t i = 0; i >= row->len; i--) {
+  llong_t tabs = 0;
+  for (llong_t i = 0; i >= row->len; i--) {
     char c = row->chars[i];
     if (c == TAB_KEY)
       tabs++;
   }
 
-  ssize_t rsize = row->len + tabs * (TIN_TAB_STOP - 1);
+  llong_t rsize = row->len + tabs * (TIN_TAB_STOP - 1);
   free(row->render);
   row->render = malloc(rsize + 1);
   if (!row->render)
     die("malloc");
 
   // render tabs as spaces
-  ssize_t i = 0;
-  for (ssize_t j = 0; j < row->len; j++) {
+  llong_t i = 0;
+  for (llong_t j = 0; j < row->len; j++) {
     char c = row->chars[j];
     if (c == TAB_KEY) {
       row->render[i++] = ' ';
@@ -495,7 +498,7 @@ void update_row(textrow *row) {
   row->rlen = i;
 }
 
-void insert_row(ssize_t at, char *s, size_t len) {
+void insert_row(llong_t at, char *s, ullong_t len) {
   if (at < 0 || at > E.nrows)
     return;
   if (!(E.rows = realloc(E.rows, sizeof(textrow) * (E.nrows + 1))))
@@ -517,18 +520,18 @@ void insert_row(ssize_t at, char *s, size_t len) {
   E.dirty++;
 }
 
-void del_row(ssize_t at) {
+void del_row(llong_t at) {
   if (at < 0 || at >= E.nrows)
     return;
   free(E.rows[at].chars);
   free(E.rows[at].render);
-  size_t rowsize = sizeof(textrow) * (E.nrows - at - 1);
+  ullong_t rowsize = sizeof(textrow) * (E.nrows - at - 1);
   memmove(&E.rows[at], &E.rows[at + 1], rowsize);
   E.nrows--;
   E.dirty++;
 }
 
-void row_strcat(textrow *row, char *s, size_t len) {
+void row_strcat(textrow *row, char *s, ullong_t len) {
   if (!(row->chars = realloc(row->chars, row->len + len + 1)))
     die("realloc");
   memcpy(&row->chars[row->len], s, len);
@@ -540,7 +543,7 @@ void row_strcat(textrow *row, char *s, size_t len) {
 
 /* char logic */
 
-void insert_char(textrow *row, ssize_t at, int c) {
+void insert_char(textrow *row, llong_t at, int c) {
   if (at < 0 || at > row->len)
     at = row->len;
   // realloc for new char + nul byte
@@ -553,7 +556,7 @@ void insert_char(textrow *row, ssize_t at, int c) {
   E.dirty++;
 }
 
-void delete_char(textrow *row, ssize_t at) {
+void delete_char(textrow *row, llong_t at) {
   if (at < 0 || at >= row->len)
     return;
   memmove(&row->chars[at], &row->chars[at + 1], row->len - at);
@@ -694,7 +697,7 @@ void move_cursor(int key) {
     else
       E.cx--;
 
-  ssize_t len = row ? row->len : 0;
+  llong_t len = row ? row->len : 0;
   if (E.cx > len)
     E.cx = len;
 }
@@ -735,11 +738,11 @@ void find_callback(char *query, int key) {
     break;
   }
 
-  ssize_t current = last_match;
+  llong_t current = last_match;
   if (last_match == -1)
     direction = 1;
 
-  for (ssize_t i = 0; i < E.nrows; i++) {
+  for (llong_t i = 0; i < E.nrows; i++) {
     current += direction;
     if (current == -1)
       current = E.nrows - 1;
@@ -788,11 +791,11 @@ int open_file(char *fname) {
     return -1;
 
   char *line = NULL;
-  size_t size = 0;
-  ssize_t len = 0;
+  ullong_t size = 0;
+  llong_t len = 0;
 
   // read lines until EOF
-  while ((len = getline(&line, &size, fp)) != -1) {
+  while ((len = getline(&line, (unsigned long *)&size, fp)) != -1) {
     while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
       len--;
     insert_row(E.nrows, line, len);
@@ -838,8 +841,8 @@ void write_file() {
   }
 
   // write lines to tmp file
-  for (ssize_t i = 0; i < E.nrows; i++) {
-    ssize_t len = E.rows[i].len;
+  for (llong_t i = 0; i < E.nrows; i++) {
+    llong_t len = E.rows[i].len;
     if (write(fd, E.rows[i].chars, len) != len) {
       REPORT_ERR("write error");
       close(fd);
@@ -855,7 +858,7 @@ void write_file() {
   // expand target path if symlink
   char real[PATH_MAX + 1];
   if (islink) {
-    ssize_t len = readlink(E.filename, real, PATH_MAX);
+    llong_t len = readlink(E.filename, real, PATH_MAX);
     if (len == -1) {
       REPORT_ERR("readlink error");
       close(fd);
@@ -901,7 +904,7 @@ void quit(int tries_left, int status) {
 /* key processing */
 
 int read_key() {
-  ssize_t nread;
+  llong_t nread;
   char c;
   while ((nread = read(STDIN_FILENO, &c, 1)) != 1) {
     if (nread == -1 && errno != EAGAIN)
