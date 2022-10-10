@@ -1043,6 +1043,14 @@ void handle_key() {
 
 /* run loop */
 
+void handle_winch() {
+  // TODO: does cursor position behave properly if window resize causes it to go
+  // off screen?
+  set_editor_size();
+  // TODO: we use snprintf here... is that safe for a signal handler?
+  refresh_screen();
+}
+
 int main(int argc, char **argv) {
   enable_raw_tty();
   init_config();
@@ -1053,7 +1061,7 @@ int main(int argc, char **argv) {
 
   // handle terminal resize
   struct sigaction sa;
-  sa.sa_handler = set_editor_size;
+  sa.sa_handler = handle_winch;
   sa.sa_flags = SA_RESTART; // restart interrupted syscalls
   sigaction(SIGWINCH, &sa, NULL);
 
