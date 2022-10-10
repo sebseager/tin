@@ -65,7 +65,7 @@ typedef struct textrow {
   char *chars;   // raw chars
   llong_t rlen;  // number of rendered chars (e.g. tabs show as spaces)
   char *render;  // rendered chars
-  llong_t ndisp; // number of displayed chars (e.g. ascii, utf head bytes)
+  llong_t ndisp; // number of VISIBLE_BYTEs left of given index [0, rlen]
 } textrow;
 
 struct config {
@@ -150,8 +150,6 @@ int nplaces(llong_t n) {
     return 18;
   return 19;
 }
-
-int utflen(char head) {}
 
 /* terminal config */
 
@@ -667,26 +665,28 @@ void move_cursor(int key) {
   textrow *row = (E.cy < E.nrows) ? &E.rows[E.cy] : NULL;
   switch (key) {
   case ARROW_UP:
-    if (E.cy)
+    if (E.cy) {
       E.cy--;
+    }
     break;
   case ARROW_DOWN:
-    if (E.cy < E.nrows)
+    if (E.cy < E.nrows) {
       E.cy++;
+    }
     break;
   case ARROW_LEFT:
-    if (E.cx)
+    if (E.cx) {
       E.cx--;
-    else if (E.cy > 0) {
+    } else if (E.cy > 0) {
       // don't move up if at top
       E.cy--;
       E.cx = E.rows[E.cy].len;
     }
     break;
   case ARROW_RIGHT:
-    if (row && E.cx < row->len)
+    if (row && E.cx < row->len) {
       E.cx++;
-    else if (row && E.cx == row->len) {
+    } else if (row && E.cx == row->len) {
       E.cy++;
       E.cx = 0;
     }
@@ -696,12 +696,13 @@ void move_cursor(int key) {
   row = (E.cy < E.nrows) ? &E.rows[E.cy] : NULL;
 
   // always move cursor to head of full unicode char
-  // at the moment, no good way of telling which way to go for up/down
-  while (row && E.cx && UTF_BODY_BYTE(row->chars[E.cx]))
-    if (key == ARROW_RIGHT)
+  while (row && E.cx && UTF_BODY_BYTE(row->chars[E.cx])) {
+    if (key == ARROW_RIGHT) {
       E.cx++;
-    else
+    } else {
       E.cx--;
+    }
+  }
 
   llong_t len = row ? row->len : 0;
   if (E.cx > len)
