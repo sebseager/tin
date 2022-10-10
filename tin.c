@@ -408,25 +408,63 @@ void draw_rows(abuf *ab) {
       // get row to draw
       textrow *row = &E.rows[filerow];
 
-      // prevent incomplete utf chars at beginning of line
-      llong_t start = E.coloff;
-      while (UTF_BODY_BYTE(row->render[start]))
-        start++;
-
-      llong_t end = start;
-      llong_t displen = 0;
-      while (end < row->rlen && displen + E.lnmargin < E.wincols) {
-        char c = row->render[end++];
-        // only utf head bytes and ascii chars count towards displen
-        // this way we never end a line on an incomplete utf char
-        // (since body bytes take up no space)
+      llong_t displen, i;
+      displen = i = 0;
+      while (i < row->rlen && displen < E.coloff) {
+        char c = row->render[i++];
         if (UTF_HEAD_BYTE(c) || !UTF_BODY_BYTE(c))
           displen++;
       }
 
+      llong_t start = displen;
+      displen = 0;
+      while (i < row->rlen && displen + E.lnmargin < E.wincols) {
+        char c = row->render[i++];
+        if (UTF_HEAD_BYTE(c) || !UTF_BODY_BYTE(c))
+          displen++;
+      }
+      llong_t end = start + displen;
+
+      // for (llong_t i = 0; i < row->rlen; i++) {
+      //   if (displen == E.coloff) {
+      //     start = i;
+      //   } else if (displen - start + E.lnmargin == E.wincols) {
+      //     end = i;
+      //     break;
+      //   }
+
+      //   char c = row->render[i];
+      //   if (UTF_HEAD_BYTE(c) || !UTF_BODY_BYTE(c))
+      //     displen++;
+      // }
+
+      set_status_msg("coloff %lld, rlen %lld, start %lld end %lld", E.coloff,
+                     row->rlen, start, end);
+
+      // while (end < row->rlen &&) {
+      //   char c = row->render[end];
+      //   // mark start of the line once we've reached coloff chars displayed
+      //   if (displen == E.coloff)
+      //     start = end;
+      //   // only utf head bytes and ascii chars count towards displen
+      //   // this way we never end a line on an incomplete utf char
+      //   // (since body bytes take up no space)
+
+      //   end++;
+      // }
+      // llong_t start = E.coloff;
+      // while (UTF_BODY_BYTE(row->render[start]))
+      //   start++;
+
+      // llong_t end = start;
+      // llong_t displen = 0;
+      // while (end < row->rlen && displen + E.lnmargin < E.wincols) {
+      //   char c = row->render[end++];
+
+      // }
+
       // draw row
-      llong_t len = end - start;
-      ab_strcat(ab, &E.rows[filerow].render[start], len);
+      ab_strcat(ab, &E.rows[filerow].render[start], end - start);
     }
 
     ab_strcat(ab, ESC_SEQ "K", 3); // clear line being drawn
