@@ -68,6 +68,7 @@ typedef struct textrow {
 } textrow;
 
 struct config {
+  struct termios orig_tty;
   llong_t cx, cy;           // cursor position
   llong_t rx;               // horizontal cursor render position
   llong_t winrows, wincols; // window size
@@ -79,7 +80,6 @@ struct config {
   char statusmsg[128];      // status message
   time_t statusmsg_time;    // time status message was last updated
   ullong_t dirty;           // number of changes since last save
-  struct termios orig_tty;
 };
 
 struct config E; // global editor config
@@ -370,16 +370,21 @@ void scroll() {
     E.rx = cx_to_rx(&E.rows[E.cy], E.cx);
   }
 
-  // adjust offsets if cursor if off screen
-  if (E.cy < E.rowoff)
+  // adjust offsets if cursor is off screen
+  if (E.cy < E.rowoff) {
     E.rowoff = E.cy;
-  if (E.cy >= E.rowoff + E.winrows)
+  }
+  if (E.cy >= E.rowoff + E.winrows) {
     E.rowoff = E.cy - E.winrows + 1;
-  if (E.rx < E.coloff)
+  }
+  if (E.rx < E.coloff) {
     E.coloff = E.rx;
+  }
+
   // extra math here to handle line numbers
-  if (E.rx + E.lnmargin >= E.coloff + E.wincols)
+  if (E.rx + E.lnmargin >= E.coloff + E.wincols) {
     E.coloff = E.rx + E.lnmargin - E.wincols + 1;
+  }
 }
 
 void draw_rows(abuf *ab) {
@@ -394,6 +399,9 @@ void draw_rows(abuf *ab) {
         ab_strcat(ab, "~", 1);
       }
     } else {
+      // get row to be drawn
+      textrow *row = &E.rows[filerow];
+
       // draw line number
       char numstr[E.lnmargin];
       int numlen = snprintf(numstr, E.lnmargin, "%lld", filerow + 1);
@@ -404,9 +412,6 @@ void draw_rows(abuf *ab) {
       ab_strcat(ab, numstr, E.lnmargin - 1);
       ab_strcat(ab, ESC_SEQ "m", 3); // reset colors
       ab_charcat(ab, ' ');
-
-      // get row to draw
-      textrow *row = &E.rows[filerow];
 
       llong_t displen, i;
       displen = i = 0;
@@ -491,6 +496,17 @@ void update_row(textrow *row) {
   row->rlen = i;
 }
 
+void del_row(llong_t at) {
+  if (at < 0 || at >= E.nrows)
+    return;
+  free(E.rows[at].chars);
+  free(E.rows[at].render);
+  ullong_t rowsize = sizeof(textrow) * (E.nrows - at - 1);
+  memmove(&E.rows[at], &E.rows[at + 1], rowsize);
+  E.nrows--;
+  E.dirty++;
+}
+
 void insert_row(llong_t at, char *s, ullong_t len) {
   if (at < 0 || at > E.nrows)
     return;
@@ -510,17 +526,6 @@ void insert_row(llong_t at, char *s, ullong_t len) {
   update_row(&E.rows[at]);
 
   E.nrows++;
-  E.dirty++;
-}
-
-void del_row(llong_t at) {
-  if (at < 0 || at >= E.nrows)
-    return;
-  free(E.rows[at].chars);
-  free(E.rows[at].render);
-  ullong_t rowsize = sizeof(textrow) * (E.nrows - at - 1);
-  memmove(&E.rows[at], &E.rows[at + 1], rowsize);
-  E.nrows--;
   E.dirty++;
 }
 
