@@ -2,7 +2,7 @@
 #include <string.h>
 #include <unistd.h>
 
-int ab_realloc(struct abuf *ab, size_t new_len) {
+int ab_realloc(struct abuf *ab, unsigned long long new_len) {
   if (new_len >= ab->size) {
     ab->size = (ab->size + new_len + 1) * 2;
     char *tmp = realloc(ab->buf, ab->size);
@@ -27,8 +27,8 @@ int ab_charcat(struct abuf *ab, char c) {
   return 0;
 }
 
-int ab_strcat(struct abuf *ab, const char *s, size_t len) {
-  size_t new_len = ab->len + len;
+int ab_strcat(struct abuf *ab, const char *s, unsigned long long len) {
+  unsigned long long new_len = ab->len + len;
   if (ab_realloc(ab, new_len + 1) == -1)
     return -1;
   memcpy(&ab->buf[ab->len], s, len);
@@ -37,7 +37,7 @@ int ab_strcat(struct abuf *ab, const char *s, size_t len) {
   return 0;
 }
 
-void ab_pop(struct abuf *ab, ssize_t times) {
+void ab_pop(struct abuf *ab, unsigned long long times) {
   while (ab->len > 0 && times-- > 0) {
     ab->len--;
     ab->buf[ab->len] = '\0';
