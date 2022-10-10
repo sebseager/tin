@@ -37,6 +37,7 @@
 // 11110xxx   head of four-byte sequence
 #define UTF_HEAD_BYTE(c) (!((c & 0xC0) ^ 0xC0))
 #define UTF_BODY_BYTE(c) (!((c & 0xC0) ^ 0x80))
+#define VISIBLE_BYTE(c) (UTF_HEAD_BYTE(c) || !UTF_BODY_BYTE(c))
 
 enum named_key {
   TAB_KEY = '\t',
@@ -60,11 +61,11 @@ typedef long long llong_t;
 typedef unsigned long long ullong_t;
 
 typedef struct textrow {
-  llong_t len;    // number of raw chars
-  char *chars;    // raw chars
-  llong_t rlen;   // number of rendered chars (e.g. tabs show as spaces)
-  char *render;   // rendered chars
-  llong_t ninvis; // number of invisible chars (e.g. utf body bytes)
+  llong_t len;   // number of raw chars
+  char *chars;   // raw chars
+  llong_t rlen;  // number of rendered chars (e.g. tabs show as spaces)
+  char *render;  // rendered chars
+  llong_t ndisp; // number of displayed chars (e.g. ascii, utf head bytes)
 } textrow;
 
 struct config {
@@ -91,12 +92,14 @@ void clear_tty();
 
 /* helpers */
 
+// keel over dead due to failure in function named s
 void die(const char *s) {
   clear_tty();
   perror(s);
   exit(1);
 }
 
+// write formatted string to bottom status bar
 void set_status_msg(const char *fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
@@ -105,6 +108,7 @@ void set_status_msg(const char *fmt, ...) {
   E.statusmsg_time = time(NULL);
 }
 
+// return the number of characters needed to represent n
 int nplaces(llong_t n) {
   if (n < 0)
     n = (n == INT_MIN) ? INT_MAX : -n;
@@ -147,8 +151,11 @@ int nplaces(llong_t n) {
   return 19;
 }
 
+int utflen(char head) {}
+
 /* terminal config */
 
+// set rows, cols to current cursor position
 int cursor_pos(llong_t *rows, llong_t *cols) {
   if (write(STDOUT_FILENO, ESC_SEQ "6n", 4) != 4)
     return -1;
@@ -171,6 +178,8 @@ int cursor_pos(llong_t *rows, llong_t *cols) {
   return 0;
 }
 
+// try to get window size using ioctl first
+// otherwise, move cursor to bottom right and get position
 int measure_window(llong_t *rows, llong_t *cols) {
   struct winsize ws;
   if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0) {
@@ -259,8 +268,7 @@ void draw_top_status(abuf *ab) {
   llong_t row = E.rows ? E.cy + 1 : 0;
   llong_t col = E.rx + 1;
   llong_t nrows = E.nrows;
-  llong_t ncols =
-      (E.rows && E.cy < E.nrows ? E.rows[E.cy].rlen - E.rows[E.cy].ninvis : 0);
+  llong_t ncols = (E.rows && E.cy < E.nrows ? E.rows[E.cy].ndisp : 0);
 
   // build status bar
   llong_t barlen = E.wincols;
@@ -345,7 +353,7 @@ void draw_welcome(abuf *ab, int line) {
     len = snprintf(msg, sizeof(msg), "version %s", TIN_VERSION);
     break;
   case 2:
-    len = snprintf(msg, sizeof(msg), "^X exit   ^S save   ^F find");
+    len = snprintf(msg, sizeof(msg), "^X exit    ^S save    ^F find");
     break;
   default:
     len = 0;
@@ -417,14 +425,14 @@ void draw_rows(abuf *ab) {
       displen = i = 0;
       while (i < row->rlen && displen <= E.coloff) {
         char c = row->render[i++];
-        if (UTF_HEAD_BYTE(c) || !UTF_BODY_BYTE(c))
+        if (VISIBLE_BYTE(c))
           displen++;
       }
       llong_t start = --i;
       displen = 0;
       while (i < row->rlen && displen + E.lnmargin < E.wincols) {
         char c = row->render[i++];
-        if (UTF_HEAD_BYTE(c) || !UTF_BODY_BYTE(c))
+        if (VISIBLE_BYTE(c))
           displen++;
       }
 
@@ -522,7 +530,7 @@ void insert_row(llong_t at, char *s, ullong_t len) {
 
   E.rows[at].rlen = 0;
   E.rows[at].render = NULL;
-  E.rows[at].ninvis = 0;
+  E.rows[at].ndisp = 0;
   update_row(&E.rows[at]);
 
   E.nrows++;
@@ -571,8 +579,8 @@ void insert_at_cursor(int c) {
     insert_row(E.nrows, "", 0);
   textrow *row = &E.rows[E.cy];
   insert_char(row, E.cx++, c);
-  if (UTF_BODY_BYTE(c))
-    row->ninvis++;
+  if (VISIBLE_BYTE(c))
+    row->ndisp++;
 }
 
 void backspace_at_cursor() {
@@ -587,10 +595,10 @@ void backspace_at_cursor() {
     while (UTF_BODY_BYTE(row->chars[E.cx - 1])) {
       delete_char(row, E.cx - 1);
       E.cx--;
-      row->ninvis--;
     }
     delete_char(row, E.cx - 1);
     E.cx--;
+    row->ndisp--;
   } else {
     E.cx = E.rows[E.cy - 1].len;
     row_strcat(&E.rows[E.cy - 1], row->chars, row->len);
@@ -890,7 +898,7 @@ void write_file() {
 
 void quit(int tries_left, int status) {
   if (E.dirty && tries_left) {
-    char *fmt = "Unsaved changes in buffer! (press ^X %d more %s to quit)";
+    char *fmt = "UNSAVED CHANGES! (^X %d more %s to quit)";
     char *noun = (tries_left == 1) ? "time" : "times";
     set_status_msg(fmt, tries_left, noun);
     return;
