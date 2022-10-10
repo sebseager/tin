@@ -72,7 +72,7 @@ struct config {
   llong_t rx;               // horizontal cursor render position
   llong_t winrows, wincols; // window size
   llong_t rowoff, coloff;   // scroll offsets
-  llong_t numoff;           // line number offset
+  llong_t lnmargin;         // line number margin
   llong_t nrows;            // number of text rows
   textrow *rows;            // text lines
   char *filename;           // filename
@@ -185,18 +185,10 @@ int measure_window(llong_t *rows, llong_t *cols) {
   return 0;
 }
 
-void set_numoff() {
-  E.wincols += E.numoff;
-  E.numoff = nplaces(E.nrows) + 1;
-  E.wincols -= E.numoff;
-}
-
 void set_editor_size() {
   if (measure_window(&E.winrows, &E.wincols) == -1)
     die("measure_window");
   E.winrows -= 2; // for status bar and status message
-  set_numoff();
-  set_status_msg("%lld %lld", E.winrows, E.wincols);
 }
 
 void init_config() {
@@ -204,6 +196,7 @@ void init_config() {
   E.rowoff = E.coloff = 0;
   E.nrows = 0;
   E.rows = NULL;
+  E.lnmargin = 2; // single digit line number to start, plus one space
   E.filename = NULL;
   E.statusmsg[0] = '\0';
   E.statusmsg_time = 0;
@@ -270,11 +263,11 @@ void draw_top_status(abuf *ab) {
       (E.rows && E.cy < E.nrows ? E.rows[E.cy].rlen - E.rows[E.cy].ninvis : 0);
 
   // build status bar
-  llong_t barlen = E.wincols + E.numoff;
+  llong_t barlen = E.wincols;
   char lmsg[barlen + 1], rmsg[barlen + 1];
   llong_t rlen = barlen;
-  rlen = snprintf(rmsg, rlen, "line %lld/%lld, col %lld/%lld", row, nrows, col,
-                  ncols);
+  rlen = snprintf(rmsg, rlen, "L%lld/%lld : C%lld/%lld (%lldx%lld)", row, nrows,
+                  col, ncols, E.winrows, E.wincols);
   llong_t llen = barlen - rlen;
   llen = snprintf(lmsg, llen, "[%s] %.20s", dirty, fname);
 
@@ -295,7 +288,7 @@ void draw_bot_status(abuf *ab) {
   if (time(NULL) - E.statusmsg_time >= TIN_STATUS_MSG_SECS)
     E.statusmsg[0] = '\0';
 
-  llong_t barlen = E.wincols + E.numoff;
+  llong_t barlen = E.wincols;
   llong_t msglen = strlen(E.statusmsg);
   if (msglen > barlen)
     msglen = barlen;
@@ -384,8 +377,9 @@ void scroll() {
     E.rowoff = E.cy - E.winrows + 1;
   if (E.rx < E.coloff)
     E.coloff = E.rx;
-  if (E.rx >= E.coloff + E.wincols)
-    E.coloff = E.rx - E.wincols + 1;
+  // extra math here to handle line numbers
+  if (E.rx + E.lnmargin >= E.coloff + E.wincols)
+    E.coloff = E.rx + E.lnmargin - E.wincols + 1;
 }
 
 void draw_rows(abuf *ab) {
@@ -400,6 +394,18 @@ void draw_rows(abuf *ab) {
         ab_strcat(ab, "~", 1);
       }
     } else {
+      // draw line number
+      char numstr[E.lnmargin];
+      int numlen = snprintf(numstr, E.lnmargin, "%lld", filerow + 1);
+      ab_strcat(ab, ESC_SEQ "31m", 5); // color line numbers
+      while (numlen++ < E.lnmargin - 1) {
+        ab_charcat(ab, ' ');
+      }
+      ab_strcat(ab, numstr, E.lnmargin - 1);
+      ab_strcat(ab, ESC_SEQ "m", 3); // reset colors
+      ab_charcat(ab, ' ');
+
+      // get row to draw
       textrow *row = &E.rows[filerow];
 
       // prevent incomplete utf chars at beginning of line
@@ -407,31 +413,19 @@ void draw_rows(abuf *ab) {
       while (UTF_BODY_BYTE(row->render[start]))
         start++;
 
-      llong_t i = start;
+      llong_t end = start;
       llong_t displen = 0;
-      while (i < row->rlen && displen < E.wincols) {
-        char c = row->render[i++];
-        if (!UTF_BODY_BYTE(c))
+      while (end < row->rlen && displen + E.lnmargin < E.wincols) {
+        char c = row->render[end++];
+        // only utf head bytes and ascii chars count towards displen
+        // this way we never end a line on an incomplete utf char
+        // (since body bytes take up no space)
+        if (UTF_HEAD_BYTE(c) || !UTF_BODY_BYTE(c))
           displen++;
       }
 
-      // prevent incomplete utf chars at end of line
-      while (UTF_BODY_BYTE(E.rows[filerow].render[i]))
-        i--;
-      llong_t len = i - start;
-
-      // draw line number
-      char numstr[E.numoff];
-      int numlen = snprintf(numstr, E.numoff, "%lld", filerow + 1);
-      ab_strcat(ab, ESC_SEQ "31m", 5); // color line numbers
-      while (numlen++ < E.numoff - 1) {
-        ab_charcat(ab, ' ');
-      }
-      ab_strcat(ab, numstr, E.numoff - 1);
-      ab_strcat(ab, ESC_SEQ "m", 3); // reset colors
-      ab_charcat(ab, ' ');
-
       // draw row
+      llong_t len = end - start;
       ab_strcat(ab, &E.rows[filerow].render[start], len);
     }
 
@@ -442,13 +436,13 @@ void draw_rows(abuf *ab) {
 
 void refresh_screen() {
   scroll();
+  E.lnmargin = nplaces(E.nrows) + 1; // calculate line number margin
 
   abuf ab;
   ab_init(&ab);
   ab_strcat(&ab, ESC_SEQ "?25l", 6); // hide cursor
   ab_strcat(&ab, ESC_SEQ "H", 3);    // move cursor to top left
 
-  set_numoff();
   draw_top_status(&ab);
   draw_rows(&ab);
   draw_bot_status(&ab);
@@ -456,7 +450,7 @@ void refresh_screen() {
   // position cursor
   char buf[64] = "";
   llong_t crow = E.cy - E.rowoff + 2; // extra 1 for top status bar
-  llong_t ccol = E.rx - E.coloff + E.numoff + 1;
+  llong_t ccol = E.rx - E.coloff + E.lnmargin + 1;
   snprintf(buf, sizeof(buf), ESC_SEQ "%lld;%lldH", crow, ccol);
   ab_strcat(&ab, buf, strlen(buf));
 
