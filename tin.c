@@ -19,7 +19,7 @@
 
 /* defines */
 
-#define TIN_VERSION "0.2.1"
+#define TIN_VERSION "0.2.2"
 #define TIN_TAB_STOP 4
 #define TIN_STATUS_MSG_SECS 2
 #define TIN_QUIT_TIMES 2
@@ -61,11 +61,10 @@ typedef long long llong_t;
 typedef unsigned long long ullong_t;
 
 typedef struct textrow {
-  llong_t len;   // number of raw chars
-  char *chars;   // raw chars
-  llong_t rlen;  // number of rendered chars (e.g. tabs show as spaces)
-  char *render;  // rendered chars
-  llong_t ndisp; // number of VISIBLE_BYTEs left of given index [0, rlen]
+  llong_t len;  // number of raw chars
+  char *chars;  // raw chars
+  llong_t rlen; // number of rendered chars (e.g. tabs show as spaces)
+  char *render; // rendered chars
 } textrow;
 
 struct config {
@@ -74,7 +73,7 @@ struct config {
   llong_t rx;               // horizontal cursor render position
   llong_t winrows, wincols; // window size
   llong_t rowoff, coloff;   // scroll offsets
-  llong_t lnmargin;         // line number margin
+  llong_t lnoff;            // line number offset
   llong_t nrows;            // number of text rows
   textrow *rows;            // text lines
   char *filename;           // filename
@@ -203,7 +202,7 @@ void init_config() {
   E.rowoff = E.coloff = 0;
   E.nrows = 0;
   E.rows = NULL;
-  E.lnmargin = 2; // single digit line number to start, plus one space
+  E.lnoff = 2; // single digit line number to start, plus one space
   E.filename = NULL;
   E.statusmsg[0] = '\0';
   E.statusmsg_time = 0;
@@ -266,14 +265,13 @@ void draw_top_status(abuf *ab) {
   llong_t row = E.rows ? E.cy + 1 : 0;
   llong_t col = E.rx + 1;
   llong_t nrows = E.nrows;
-  llong_t ncols = (E.rows && E.cy < E.nrows ? E.rows[E.cy].ndisp : 0);
 
   // build status bar
   llong_t barlen = E.wincols;
   char lmsg[barlen + 1], rmsg[barlen + 1];
   llong_t rlen = barlen;
-  rlen = snprintf(rmsg, rlen, "L%lld/%lld : C%lld/%lld (%lldx%lld)", row, nrows,
-                  col, ncols, E.winrows, E.wincols);
+  rlen = snprintf(rmsg, rlen, "L%lld/%lld C%lld (%lldx%lld)", row, nrows, col,
+                  E.winrows, E.wincols);
   llong_t llen = barlen - rlen;
   llen = snprintf(lmsg, llen, "[%s] %.20s", dirty, fname);
 
@@ -388,8 +386,8 @@ void scroll() {
   }
 
   // extra math here to handle line numbers
-  if (E.rx + E.lnmargin >= E.coloff + E.wincols) {
-    E.coloff = E.rx + E.lnmargin - E.wincols + 1;
+  if (E.rx + E.lnoff >= E.coloff + E.wincols) {
+    E.coloff = E.rx + E.lnoff - E.wincols + 1;
   }
 }
 
@@ -409,13 +407,13 @@ void draw_rows(abuf *ab) {
       textrow *row = &E.rows[filerow];
 
       // draw line number
-      char numstr[E.lnmargin];
-      int numlen = snprintf(numstr, E.lnmargin, "%lld", filerow + 1);
+      char numstr[E.lnoff];
+      int numlen = snprintf(numstr, E.lnoff, "%lld", filerow + 1);
       ab_strcat(ab, ESC_SEQ "31m", 5); // color line numbers
-      while (numlen++ < E.lnmargin - 1) {
+      while (numlen++ < E.lnoff - 1) {
         ab_charcat(ab, ' ');
       }
-      ab_strcat(ab, numstr, E.lnmargin - 1);
+      ab_strcat(ab, numstr, E.lnoff - 1);
       ab_strcat(ab, ESC_SEQ "m", 3); // reset colors
       ab_charcat(ab, ' ');
 
@@ -428,7 +426,7 @@ void draw_rows(abuf *ab) {
       }
       llong_t start = --i;
       displen = 0;
-      while (i < row->rlen && displen + E.lnmargin < E.wincols) {
+      while (i < row->rlen && displen + E.lnoff < E.wincols) {
         char c = row->render[i++];
         if (VISIBLE_BYTE(c))
           displen++;
@@ -446,7 +444,7 @@ void draw_rows(abuf *ab) {
 
 void refresh_screen() {
   scroll();
-  E.lnmargin = nplaces(E.nrows) + 1; // calculate line number margin
+  E.lnoff = nplaces(E.nrows) + 1; // calculate line number offset
 
   abuf ab;
   ab_init(&ab);
@@ -460,7 +458,7 @@ void refresh_screen() {
   // position cursor
   char buf[64] = "";
   llong_t crow = E.cy - E.rowoff + 2; // extra 1 for top status bar
-  llong_t ccol = E.rx - E.coloff + E.lnmargin + 1;
+  llong_t ccol = E.rx - E.coloff + E.lnoff + 1;
   snprintf(buf, sizeof(buf), ESC_SEQ "%lld;%lldH", crow, ccol);
   ab_strcat(&ab, buf, strlen(buf));
 
@@ -471,6 +469,7 @@ void refresh_screen() {
 
 /* row logic */
 
+// update rlen and render for the given row
 void update_row(textrow *row) {
   llong_t tabs = 0;
   for (llong_t i = 0; i >= row->len; i--) {
@@ -479,9 +478,8 @@ void update_row(textrow *row) {
       tabs++;
   }
 
-  llong_t rsize = row->len + tabs * (TIN_TAB_STOP - 1);
   free(row->render);
-  row->render = malloc(rsize + 1);
+  row->render = malloc(row->len + tabs * (TIN_TAB_STOP - 1) + 1);
   if (!row->render)
     die("malloc");
 
@@ -524,11 +522,10 @@ void insert_row(llong_t at, char *s, ullong_t len) {
   if (!(E.rows[at].chars = malloc(len + 1)))
     die("malloc");
   memcpy(E.rows[at].chars, s, len);
-  E.rows[at].chars[len] = '\0';
 
+  E.rows[at].chars[len] = '\0';
   E.rows[at].rlen = 0;
   E.rows[at].render = NULL;
-  E.rows[at].ndisp = 0;
   update_row(&E.rows[at]);
 
   E.nrows++;
@@ -577,8 +574,6 @@ void insert_at_cursor(int c) {
     insert_row(E.nrows, "", 0);
   textrow *row = &E.rows[E.cy];
   insert_char(row, E.cx++, c);
-  if (VISIBLE_BYTE(c))
-    row->ndisp++;
 }
 
 void backspace_at_cursor() {
@@ -596,7 +591,6 @@ void backspace_at_cursor() {
     }
     delete_char(row, E.cx - 1);
     E.cx--;
-    row->ndisp--;
   } else {
     E.cx = E.rows[E.cy - 1].len;
     row_strcat(&E.rows[E.cy - 1], row->chars, row->len);
@@ -609,15 +603,38 @@ void newline_at_cursor() {
   if (E.cx == 0) {
     insert_row(E.cy, "", 0);
   } else {
-    textrow *row = &E.rows[E.cy];
-    insert_row(E.cy + 1, &row->chars[E.cx], row->len - E.cx);
-    row = &E.rows[E.cy];
+    textrow *row = &E.rows[E.cy];                             // current row
+    insert_row(E.cy + 1, &row->chars[E.cx], row->len - E.cx); // split to new
+    row = &E.rows[E.cy]; // original row again
     row->len = E.cx;
     row->chars[row->len] = '\0';
     update_row(row);
+    E.cx = 0;
+
+    // measure last line's indent
+    llong_t ntabs = 0;
+    for (llong_t i = 0; i < row->len; i++) {
+      if (row->chars[i] != '\t')
+        ntabs = i;
+    }
+
+    // apply last line's indent
+    while (ntabs--) {
+      insert_char(&E.rows[E.cy + 1], E.cx++, TAB_KEY);
+    }
+    update_row(&E.rows[E.cy + 1]);
+
+    // if last line ended with a brace, paren, or bracket, indent again
+    if (row->len) {
+      char c = row->chars[row->len - 1];
+      if (c == '{' || c == '(' || c == '[') {
+        insert_char(&E.rows[E.cy + 1], E.cx++, TAB_KEY);
+      }
+    }
+    update_row(&E.rows[E.cy + 1]);
+
+    E.cy++;
   }
-  E.cy++;
-  E.cx = 0;
 }
 
 char *prompt(char *prompt, void (*callback)(char *, int)) {
@@ -1057,8 +1074,8 @@ void handle_key() {
 /* run loop */
 
 void handle_winch() {
-  // TODO: does cursor position behave properly if window resize causes it to go
-  // off screen?
+  // TODO: does cursor position behave properly if window resize causes it to
+  // go off screen?
   set_editor_size();
   // TODO: we use snprintf here... is that safe for a signal handler?
   refresh_screen();
