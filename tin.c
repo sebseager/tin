@@ -614,8 +614,10 @@ void newline_at_cursor() {
     // measure last line's indent
     llong_t ntabs = 0;
     for (llong_t i = 0; i < row->len; i++) {
-      if (row->chars[i] != '\t')
-        ntabs = i;
+      if (row->chars[i] == '\t')
+        ntabs++;
+      else
+        break;
     }
 
     // apply last line's indent
