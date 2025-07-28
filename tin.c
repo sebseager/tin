@@ -602,6 +602,7 @@ void backspace_at_cursor() {
 void newline_at_cursor() {
   if (E.cx == 0) {
     insert_row(E.cy, "", 0);
+    E.cy++;
   } else {
     textrow *row = &E.rows[E.cy];                             // current row
     insert_row(E.cy + 1, &row->chars[E.cx], row->len - E.cx); // split to new
