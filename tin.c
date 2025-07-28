@@ -24,6 +24,7 @@
 #define TIN_STATUS_MSG_SECS 2
 #define TIN_QUIT_TIMES 2
 #define TIN_DELETE_SCROLL_CHARS 8
+#define TIN_NEWLINE_BUFFER_LINES 3
 #define ESC_SEQ "\x1b["
 #define CTRL_KEY(key) (0x1f & (key))
 #define REPORT_ERR(msg) (set_status_msg(msg ": %s", strerror(errno)))
@@ -643,6 +644,11 @@ void newline_at_cursor() {
     update_row(&E.rows[E.cy + 1]);
 
     E.cy++;
+  }
+
+  // add empty space below buffer when creating new lines
+  if (E.cy >= E.rowoff + E.winrows - TIN_NEWLINE_BUFFER_LINES) {
+    E.rowoff = E.cy - E.winrows + TIN_NEWLINE_BUFFER_LINES;
   }
 }
 
