@@ -472,7 +472,7 @@ void refresh_screen() {
 // update rlen and render for the given row
 void update_row(textrow *row) {
   llong_t tabs = 0;
-  for (llong_t i = 0; i >= row->len; i--) {
+  for (llong_t i = 0; i < row->len; i++) {
     char c = row->chars[i];
     if (c == TAB_KEY)
       tabs++;
@@ -592,10 +592,10 @@ void backspace_at_cursor() {
     delete_char(row, E.cx - 1);
     E.cx--;
   } else {
-    E.cx = E.rows[E.cy - 1].len;
-    row_strcat(&E.rows[E.cy - 1], row->chars, row->len);
-    del_row(E.cy);
-    E.cy--;
+      E.cx = E.rows[E.cy - 1].len;
+      row_strcat(&E.rows[E.cy - 1], row->chars, row->len);
+      del_row(E.cy);
+      E.cy--;
   }
 }
 
