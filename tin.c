@@ -23,6 +23,7 @@
 #define TIN_TAB_STOP 4
 #define TIN_STATUS_MSG_SECS 2
 #define TIN_QUIT_TIMES 2
+#define TIN_DELETE_SCROLL_CHARS 8
 #define ESC_SEQ "\x1b["
 #define CTRL_KEY(key) (0x1f & (key))
 #define REPORT_ERR(msg) (set_status_msg(msg ": %s", strerror(errno)))
@@ -591,6 +592,11 @@ void backspace_at_cursor() {
     }
     delete_char(row, E.cx - 1);
     E.cx--;
+    
+    // move screen before the cursor gets to the edge when deleting
+    if (E.coloff > 0 && E.rx - E.coloff < TIN_DELETE_SCROLL_CHARS) {
+      E.coloff = (E.rx > TIN_DELETE_SCROLL_CHARS) ? E.rx - TIN_DELETE_SCROLL_CHARS : 0;
+    }
   } else {
       E.cx = E.rows[E.cy - 1].len;
       row_strcat(&E.rows[E.cy - 1], row->chars, row->len);
