@@ -312,7 +312,7 @@ void draw_bot_status(abuf *ab) {
 void draw_help(abuf *ab) {
   // help screen dimensions and positioning
   llong_t help_width = 60;
-  llong_t help_height = 13;  // reduced by 1 since we removed the separator
+  llong_t help_height = 20;
   llong_t start_row = (E.winrows - help_height) / 2 + 2; // +2 for status bar and gap
   llong_t start_col = (E.wincols - help_width) / 2;
   
@@ -379,9 +379,13 @@ void draw_help(abuf *ab) {
       llong_t cmd_idx = row - 1;
       ab_strcat(ab, vertical, strlen(vertical));
       
+      // calculate total number of commands and split evenly
+      llong_t n_cmds = sizeof(commands) / sizeof(commands[0]);
+      llong_t cmds_per_col = (n_cmds + 1) / 2; // round up for odd numbers
+      
       // left column - first half of commands
       char left_content[32] = "";
-      if (cmd_idx < 6 && cmd_idx < 12) {
+      if (cmd_idx < cmds_per_col) {
         snprintf(left_content, sizeof(left_content), " %-10s %s", 
                  commands[cmd_idx][0], commands[cmd_idx][1]);
       }
@@ -395,8 +399,8 @@ void draw_help(abuf *ab) {
       
       // right column - second half of commands
       char right_content[32] = "";
-      llong_t right_cmd_idx = cmd_idx + 6;
-      if (right_cmd_idx < 12) {
+      llong_t right_cmd_idx = cmd_idx + cmds_per_col;
+      if (right_cmd_idx < n_cmds) {
         snprintf(right_content, sizeof(right_content), " %-10s %s", 
                  commands[right_cmd_idx][0], commands[right_cmd_idx][1]);
       }
