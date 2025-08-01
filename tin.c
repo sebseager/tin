@@ -57,6 +57,8 @@ enum named_key {
   END_KEY,
   PAGE_UP,
   PAGE_DOWN,
+  SCROLL_UP,
+  SCROLL_DOWN,
 };
 
 typedef long long llong_t;
@@ -222,6 +224,10 @@ void clear_tty() {
 }
 
 void disable_raw_tty() {
+  // disable mouse reporting
+  write(STDOUT_FILENO, ESC_SEQ "?1000l", 8); // disable mouse reporting
+  write(STDOUT_FILENO, ESC_SEQ "?1006l", 8); // disable SGR mouse mode
+  
   if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &E.orig_tty) == -1)
     die("tcsetattr");
 }
@@ -256,6 +262,10 @@ void enable_raw_tty() {
 
   if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &tty) == -1)
     die("tcsetattr");
+
+  // enable mouse reporting (scroll wheel events)
+  write(STDOUT_FILENO, ESC_SEQ "?1000h", 8); // enable mouse reporting
+  write(STDOUT_FILENO, ESC_SEQ "?1006h", 8); // enable SGR mouse mode
 }
 
 /* status bar */
@@ -1082,6 +1092,29 @@ int read_key() {
       return ESC;
 
     if (seq[0] == '[') {
+      // check for SGR mouse event: ESC[<button;col;rowM/m
+      if (seq[1] == '<') {
+        char mouse_buf[32] = "";
+        int i = 0;
+        char mc;
+        // read until we get M or m (mouse press/release)
+        while (i < sizeof(mouse_buf) - 1 && read(STDIN_FILENO, &mc, 1) == 1) {
+          mouse_buf[i++] = mc;
+          if (mc == 'M' || mc == 'm') break;
+        }
+        mouse_buf[i] = '\0';
+
+        if (i > 0 && (mc == 'M' || mc == 'm')) {
+          int button, col, row;
+          if (sscanf(mouse_buf, "%d;%d;%d", &button, &col, &row) == 3) {
+            // scroll wheel events: button 64 = scroll up, button 65 = scroll down
+            if (button == 64) return SCROLL_UP;
+            if (button == 65) return SCROLL_DOWN;
+          }
+        }
+        return ESC; // unhandled mouse event
+      }
+
       if (seq[1] >= '0' && seq[1] <= '9' && read(STDIN_FILENO, &seq[2], 1) != 1)
         return ESC;
 
@@ -1166,6 +1199,16 @@ void handle_key() {
   case ARROW_LEFT:
   case ARROW_RIGHT:
     move_cursor(c);
+    break;
+
+  case SCROLL_UP:
+    move_cursor(ARROW_UP);
+    break;
+  case SCROLL_DOWN:
+    // constrain scroll down to not go beyond last line with content
+    if (E.nrows > 0 && E.cy < E.nrows - 1) {
+      move_cursor(ARROW_DOWN);
+    }
     break;
 
   case HOME_KEY:
