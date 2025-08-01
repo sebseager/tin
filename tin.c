@@ -82,6 +82,7 @@ struct config {
   char statusmsg[128];      // status message
   time_t statusmsg_time;    // time status message was last updated
   ullong_t dirty;           // number of changes since last save
+  int show_help;            // flag to show help overlay
 };
 
 struct config E; // global editor config
@@ -209,6 +210,7 @@ void init_config() {
   E.statusmsg[0] = '\0';
   E.statusmsg_time = 0;
   E.dirty = 0;
+  E.show_help = 0;
   set_editor_size();
 }
 
@@ -307,6 +309,110 @@ void draw_bot_status(abuf *ab) {
   ab_strcat(ab, ESC_SEQ "m", 3); // reset colors
 }
 
+void draw_help(abuf *ab) {
+  // help screen dimensions and positioning
+  llong_t help_width = 60;
+  llong_t help_height = 13;  // reduced by 1 since we removed the separator
+  llong_t start_row = (E.winrows - help_height) / 2 + 2; // +2 for status bar and gap
+  llong_t start_col = (E.wincols - help_width) / 2;
+  
+  // ensure help box fits on screen
+  if (help_width > E.wincols - 2) help_width = E.wincols - 2;
+  if (help_height > E.winrows - 2) help_height = E.winrows - 2;
+  if (start_col < 2) start_col = 2;
+  if (start_row < 3) start_row = 3;
+  
+  // unicode box drawing characters
+  const char *top_left = "┌";
+  const char *top_right = "┐";
+  const char *bottom_left = "└";
+  const char *bottom_right = "┘";
+  const char *horizontal = "─";
+  const char *vertical = "│";
+  const char *horizontal_up = "┴";
+  
+  // commands to display
+  const char *commands[][2] = {
+    {"^F", "find text"},
+    {"^O", "save file"},
+    {"^X", "exit editor"},
+    {"^?", "show this help"},
+    {"Arrows", "move cursor"}
+  };
+  
+  for (llong_t row = 0; row < help_height; row++) {
+    // position cursor
+    char pos_buf[32];
+    snprintf(pos_buf, sizeof(pos_buf), ESC_SEQ "%lld;%lldH", start_row + row, start_col);
+    ab_strcat(ab, pos_buf, strlen(pos_buf));
+    
+    // set white background, black text
+    ab_strcat(ab, ESC_SEQ "47;30m", 8);
+    
+    if (row == 0) {
+      // top border with title
+      ab_strcat(ab, top_left, strlen(top_left));
+      for (llong_t i = 1; i < help_width; i++) {
+        if (i == 2) {
+          ab_strcat(ab, " Help (any key to close) ", 25);
+          i += 24;
+        } else if (i == help_width / 2) {
+          ab_strcat(ab, "┬", strlen("┬")); // connect middle vertical to top
+        } else if (i < help_width) {
+          ab_strcat(ab, horizontal, strlen(horizontal));
+        }
+      }
+      ab_strcat(ab, top_right, strlen(top_right));
+    } else if (row == help_height - 1) {
+      // bottom border
+      ab_strcat(ab, bottom_left, strlen(bottom_left));
+      for (llong_t i = 1; i < help_width; i++) {
+        if (i == help_width / 2) {
+          ab_strcat(ab, horizontal_up, strlen(horizontal_up));
+        } else {
+          ab_strcat(ab, horizontal, strlen(horizontal));
+        }
+      }
+      ab_strcat(ab, bottom_right, strlen(bottom_right));
+    } else if (row > 0 && row < help_height - 1) {
+      // content rows
+      llong_t cmd_idx = row - 1;
+      ab_strcat(ab, vertical, strlen(vertical));
+      
+      // left column - first half of commands
+      char left_content[32] = "";
+      if (cmd_idx < 6 && cmd_idx < 12) {
+        snprintf(left_content, sizeof(left_content), " %-10s %s", 
+                 commands[cmd_idx][0], commands[cmd_idx][1]);
+      }
+      // pad to half width
+      char left_padded[32];
+      snprintf(left_padded, sizeof(left_padded), "%-*s", (int)(help_width / 2 - 1), left_content);
+      ab_strcat(ab, left_padded, strlen(left_padded));
+      
+      // center divider
+      ab_strcat(ab, vertical, strlen(vertical));
+      
+      // right column - second half of commands
+      char right_content[32] = "";
+      llong_t right_cmd_idx = cmd_idx + 6;
+      if (right_cmd_idx < 12) {
+        snprintf(right_content, sizeof(right_content), " %-10s %s", 
+                 commands[right_cmd_idx][0], commands[right_cmd_idx][1]);
+      }
+      // pad to half width
+      char right_padded[32];
+      snprintf(right_padded, sizeof(right_padded), "%-*s", (int)(help_width / 2 - 1), right_content);
+      ab_strcat(ab, right_padded, strlen(right_padded));
+      
+      ab_strcat(ab, vertical, strlen(vertical));
+    }
+    
+    // reset colors
+    ab_strcat(ab, ESC_SEQ "m", 3);
+  }
+}
+
 /* main interface */
 
 llong_t cx_to_rx(textrow *row, llong_t cx) {
@@ -351,7 +457,7 @@ void draw_welcome(abuf *ab, int line) {
     len = snprintf(msg, sizeof(msg), "version %s", TIN_VERSION);
     break;
   case 2:
-    len = snprintf(msg, sizeof(msg), "^X exit    ^O save    ^F find");
+    len = snprintf(msg, sizeof(msg), "^X exit    ^O save    ^? help");
     break;
   default:
     len = 0;
@@ -456,6 +562,11 @@ void refresh_screen() {
   draw_top_status(&ab);
   draw_rows(&ab);
   draw_bot_status(&ab);
+
+  // draw help overlay if enabled
+  if (E.show_help) {
+    draw_help(&ab);
+  }
 
   // position cursor
   char buf[64] = "";
@@ -1022,6 +1133,12 @@ void handle_key() {
   static int quit_times = TIN_QUIT_TIMES;
   int c = read_key();
 
+  // if help is showing, any key closes it
+  if (E.show_help) {
+    E.show_help = 0;
+    return;
+  }
+
   switch (c) {
   case CTRL_KEY('x'): // quit editor
     quit(quit_times--, 0);
@@ -1031,6 +1148,9 @@ void handle_key() {
     break;
   case CTRL_KEY('f'):
     find();
+    break;
+  case CTRL_KEY('?'):
+    E.show_help = !E.show_help;
     break;
 
   case RETURN:
