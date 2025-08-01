@@ -22,9 +22,9 @@
 #define TIN_VERSION "0.2.2"
 #define TIN_TAB_STOP 4
 #define TIN_STATUS_MSG_SECS 2
-#define TIN_QUIT_TIMES 2
-#define TIN_DELETE_SCROLL_CHARS 8
-#define TIN_NEWLINE_BUFFER_LINES 3
+#define TIN_QUIT_TIMES 3
+#define TIN_DELETE_LEFT_MARGIN 8
+#define TIN_NEWLINE_BOT_MARGIN 3
 #define ESC_SEQ "\x1b["
 #define CTRL_KEY(key) (0x1f & (key))
 #define REPORT_ERR(msg) (set_status_msg(msg ": %s", strerror(errno)))
@@ -333,11 +333,11 @@ void draw_help(abuf *ab) {
   
   // commands to display
   const char *commands[][2] = {
-    {"^F", "find text"},
-    {"^O", "save file"},
-    {"^X", "exit editor"},
     {"^?", "show this help"},
-    {"Arrows", "move cursor"}
+    {"^X", "exit editor"},
+    {"^O", "save file"},
+    {"^F", "find text"},
+    {"arrows", "move cursor"}
   };
   
   for (llong_t row = 0; row < help_height; row++) {
@@ -710,8 +710,8 @@ void backspace_at_cursor() {
     E.cx--;
     
     // move screen before the cursor gets to the edge when deleting
-    if (E.coloff > 0 && E.rx - E.coloff < TIN_DELETE_SCROLL_CHARS) {
-      E.coloff = (E.rx > TIN_DELETE_SCROLL_CHARS) ? E.rx - TIN_DELETE_SCROLL_CHARS : 0;
+    if (E.coloff > 0 && E.rx - E.coloff < TIN_DELETE_LEFT_MARGIN) {
+      E.coloff = (E.rx > TIN_DELETE_LEFT_MARGIN) ? E.rx - TIN_DELETE_LEFT_MARGIN : 0;
     }
   } else {
       E.cx = E.rows[E.cy - 1].len;
@@ -762,8 +762,8 @@ void newline_at_cursor() {
   }
 
   // add empty space below buffer when creating new lines
-  if (E.cy >= E.rowoff + E.winrows - TIN_NEWLINE_BUFFER_LINES) {
-    E.rowoff = E.cy - E.winrows + TIN_NEWLINE_BUFFER_LINES;
+  if (E.cy >= E.rowoff + E.winrows - TIN_NEWLINE_BOT_MARGIN) {
+    E.rowoff = E.cy - E.winrows + TIN_NEWLINE_BOT_MARGIN;
   }
 }
 

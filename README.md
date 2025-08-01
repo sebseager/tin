@@ -1,6 +1,6 @@
-# tin - Tin Isn't Nano
+# Tin Isn't Nano
 
-Tin is a decently portable text editor written in C and based on [antirez's kilo](https://github.com/antirez/kilo).
+Tin is a portable text editor written in C and inspired by [antirez's kilo](https://github.com/antirez/kilo). It does not depend on any non-standard libraries and uses VT100 escape codes for terminal control rather than `curses`. It should run on many UNIX-based OSes, including macOS.
 
 ## Development
 
@@ -25,6 +25,7 @@ In no particular order:
 - [ ] .tinrc configuration file
 - [ ] Mouse scroll support
 - [ ] Mouse cursor click/select support
+- [x] Help screen
 
 ## Usage
 
@@ -37,7 +38,11 @@ Open a file with `tin path/to/file`.
 Within the editor, use the following commands:
 
 ```
-ctrl-x                  exit
-ctrl-s                  save
-ctrl-f <string>         find
+ctrl-x    exit
+ctrl-o    save
+ctrl-?    help
 ```
+
+## Caveats
+
+- For now, Tin does not run on Windows because it relies on the `ioctl` system call. It should work fine in Windows Subsystem for Linux (WSL).
