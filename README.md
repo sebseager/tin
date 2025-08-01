@@ -18,7 +18,7 @@ In no particular order:
 - [x] Unicode (UTF8) support
 - [ ] Keep track of changes per-line to avoid unnecessary updates
 - [ ] Copy/cut/paste
-- [ ] Auto-indent if previous line began with tabs
+- [x] Auto-indent if previous line began with tabs
 - [ ] Search highlighting
 - [ ] Replace
 - [ ] Undo/redo

@@ -351,7 +351,7 @@ void draw_welcome(abuf *ab, int line) {
     len = snprintf(msg, sizeof(msg), "version %s", TIN_VERSION);
     break;
   case 2:
-    len = snprintf(msg, sizeof(msg), "^X exit    ^S save    ^F find");
+    len = snprintf(msg, sizeof(msg), "^X exit    ^O save    ^F find");
     break;
   default:
     len = 0;
@@ -1026,7 +1026,7 @@ void handle_key() {
   case CTRL_KEY('x'): // quit editor
     quit(quit_times--, 0);
     return;
-  case CTRL_KEY('s'):
+  case CTRL_KEY('o'):
     write_file();
     break;
   case CTRL_KEY('f'):
